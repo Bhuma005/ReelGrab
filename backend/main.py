@@ -363,6 +363,20 @@ async def analyze_metadata(req: AnalyzeRequest):
     youtube_tags  = all_hashtags[:mid]
     instagram_tags = all_hashtags[mid:] or all_hashtags[:3]
 
+    sched_time = result.get("optimal_schedule_time", "07:30 PM")
+    
+    import dateutil.parser
+    from datetime import datetime, date, timedelta
+    try:
+        parsed_time = dateutil.parser.parse(sched_time).time()
+        now = datetime.now()
+        target_dt = datetime.combine(now.date(), parsed_time)
+        if target_dt < now:
+            target_dt += timedelta(days=1)
+        human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
+    except Exception:
+        human_readable_time = sched_time # fallback to raw string
+
     return {
         "viral_title":           result.get("title", ""),
         "optimized_description": result.get("description", ""),
@@ -370,5 +384,5 @@ async def analyze_metadata(req: AnalyzeRequest):
         "instagram":             instagram_tags,
         "analysis":              result.get("schedule_reasoning", ""),
         "confidence_notes":      result.get("confidence_notes", ""),
-        "scheduled_time":        result.get("optimal_schedule_time", ""),
+        "scheduled_time":        human_readable_time,
     }

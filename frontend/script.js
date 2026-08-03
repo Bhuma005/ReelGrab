@@ -574,6 +574,10 @@ function triggerAutomation() {
   ui.autoLoader.classList.remove('hidden');
   ui.autoResultBox.style.display = 'none';
 
+  // Set real-time progress indicator text
+  const btnText = ui.automateBtn.querySelector('span');
+  btnText.textContent = '⏱ Downloading & Syncing to Cloud...';
+
   const payload = {
     title: currentMetadata.title || 'Untitled',
     // Use Ollama AI-predicted description; fall back to original only if Ollama hasn't run yet
@@ -598,7 +602,7 @@ function triggerAutomation() {
       ui.autoReason.textContent = details.reasoning;
 
       ui.autoResultBox.style.display = 'block';
-      ui.automateBtn.querySelector('span').textContent = '✅ Scheduled Successfully';
+      btnText.textContent = '✅ Scheduled Successfully';
       ui.automateBtn.style.background = '#4CAF50';
       showToast("Post scheduled securely!");
     })
@@ -606,9 +610,10 @@ function triggerAutomation() {
       console.error(err);
       showToast("Error starting automation pipeline");
       ui.automateBtn.disabled = false;
-      ui.automateBtn.querySelector('span').textContent = '🚀 Automate & Post to YouTube';
+      btnText.textContent = '🚀 Automate & Post to YouTube';
     })
     .finally(() => {
       ui.autoLoader.classList.add('hidden');
     });
 }
+

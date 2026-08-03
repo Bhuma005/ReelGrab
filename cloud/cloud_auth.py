@@ -15,6 +15,13 @@ import urllib.request
 import urllib.parse
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    # Load .env from the cloud folder if it exists
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
 # ── Paths for local fallback ─────────────────────────────────────────────────
 _BACKEND_DIR   = Path(__file__).parent.parent / "backend"
 _SECRETS_FILE  = _BACKEND_DIR / "client_secrets.json"
