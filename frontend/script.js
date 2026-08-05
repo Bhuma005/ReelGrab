@@ -86,7 +86,11 @@ fetch(`${API_BASE}/auth/status`).then(r => r.json()).then(status => {
     ui.ytLoginBtn.disabled = true;
     ui.ytLoginBtn.style.background = "#333";
   }
-}).catch(console.error);
+}).catch(err => {
+  console.error("Auth status error:", err);
+  ui.ytAuthStatus.textContent = "Backend Connection Failed";
+  ui.ytAuthStatus.style.color = "#FF4444";
+});
 
 ui.fetchBtn.addEventListener('click', handleFetch);
 ui.urlInput.addEventListener('keydown', (e) => {

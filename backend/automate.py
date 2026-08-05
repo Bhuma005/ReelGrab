@@ -60,18 +60,33 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
     # ── Intelligent Date Scheduling (Max 2 per day) ──
     try:
         parsed_time = dateutil.parser.parse(sched_time).time()
-        now = datetime.now()
-        target_date = now.date()
+    except Exception as e:
+        import traceback
+        print(f"Time parsing Error: {e}")
+        print("--- Traceback ---")
+        print(traceback.format_exc())
+        print("-----------------")
+        parsed_time = (datetime.now() + timedelta(hours=2)).time()
+
+    now = datetime.now()
+    target_date = now.date()
+    target_dt = datetime.combine(target_date, parsed_time)
+    
+    # 1. If today's time has already passed, start checking from tomorrow
+    if target_dt < now:
+        target_date += timedelta(days=1)
         target_dt = datetime.combine(target_date, parsed_time)
         
-        # 1. If today's time has already passed, start checking from tomorrow
-        if target_dt < now:
-            target_date += timedelta(days=1)
-            target_dt = datetime.combine(target_date, parsed_time)
-            
-        # 2. Query Supabase to ensure MAX 2 posts per day!
+    # 2. Query Supabase to ensure MAX 2 posts per day!
+    from fastapi import HTTPException
+    
+    try:
         sb = get_supabase_client()
-        while True:
+    except EnvironmentError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    while True:
+        try:
             # Check how many videos are scheduled between start and end of target_date
             start_of_day = datetime.combine(target_date, datetime.min.time()).astimezone().isoformat()
             end_of_day = datetime.combine(target_date, datetime.max.time()).astimezone().isoformat()
@@ -90,16 +105,14 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
             # If 2 or more videos are already scheduled on this day, push exactly 24 hours forward!
             target_date += timedelta(days=1)
             target_dt = datetime.combine(target_date, parsed_time)
+        except Exception as e:
+            import traceback
+            print(f"Supabase checking error: {e}")
+            print(traceback.format_exc())
+            break  # Break out to avoid infinite loop on DB errors
             
-        final_iso_schedule = target_dt.astimezone().isoformat()
-        human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
-        
-    except Exception as e:
-        print(f"Time parsing Error: {e}")
-        # Fallback to right now + 2 hours if parse fails entirely
-        target_dt = datetime.now() + timedelta(hours=2)
-        final_iso_schedule = target_dt.astimezone().isoformat()
-        human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
+    final_iso_schedule = target_dt.astimezone().isoformat()
+    human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
 
     # 2. Download the video locally to a temporary location
     downloads_dir = Path(__file__).parent.parent / "downloads"

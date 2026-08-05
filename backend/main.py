@@ -13,7 +13,11 @@ import urllib.request
 import tempfile
 from backend.automate import router as automate_router
 from backend.youtube_auth import router as yt_auth_router
-YOUTUBE_API_KEY = "AIzaSyDhb0SPb7KyMGMluOrVSZ-SAkz2MadS8Co"
+import httpx
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), "cloud", ".env"))
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 
 app = FastAPI(title="ReelGrab")
 
@@ -95,12 +99,12 @@ async def get_formats(req: URLRequest, request: Request):
                     actual_filesize = f.get('filesize') or f.get('filesize_approx')
                     if not actual_filesize and f.get('url'):
                         try:
-                            req_head = urllib.request.Request(f.get('url'), method='HEAD')
-                            with urllib.request.urlopen(req_head, timeout=2.0) as res_head:
+                            async with httpx.AsyncClient() as client:
+                                res_head = await client.head(f.get('url'), timeout=2.0)
                                 cl = res_head.headers.get('Content-Length')
                                 if cl and cl.isdigit():
                                     actual_filesize = int(cl)
-                        except Exception:
+                        except httpx.RequestError:
                             pass
                             
                     resolutions.append({
@@ -307,13 +311,25 @@ async def download_thumbnail(req: URLRequest, request: Request):
                 ext = 'jpg'
                 
             filepath = os.path.join(DOWNLOAD_DIR, f"{temp_id}_thumb.{ext}")
-            urllib.request.urlretrieve(thumbnail_url, filepath)
+            
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(thumbnail_url, timeout=5.0)
+                    resp.raise_for_status()
+                    with open(filepath, 'wb') as f:
+                        f.write(resp.content)
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(status_code=e.response.status_code, detail=f"Failed to fetch thumbnail: {e.response.status_code}")
+            except httpx.RequestError as e:
+                raise HTTPException(status_code=504, detail="Timeout or network error while fetching thumbnail.")
             
             return FileResponse(
                 path=filepath, 
                 media_type=f"image/{ext if ext != 'jpg' else 'jpeg'}", 
                 filename=f"thumbnail_{info.get('id', temp_id)}.{ext}"
             )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Thumbnail error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error fetching thumbnail.")
@@ -334,8 +350,10 @@ async def analyze_metadata(req: AnalyzeRequest):
                 f"https://youtube.googleapis.com/youtube/v3/videos"
                 f"?part=snippet&chart=mostPopular&regionCode=IN&maxResults=20&key={YOUTUBE_API_KEY}"
             )
-            with urllib.request.urlopen(urllib.request.Request(yt_url), timeout=3.0) as yt_res:
-                yt_data = json.loads(yt_res.read())
+            async with httpx.AsyncClient() as client:
+                yt_res = await client.get(yt_url, timeout=3.0)
+                yt_res.raise_for_status()
+                yt_data = yt_res.json()
                 tags = []
                 for item in yt_data.get('items', []):
                     tags.extend(item.get('snippet', {}).get('tags', []))
@@ -343,8 +361,10 @@ async def analyze_metadata(req: AnalyzeRequest):
                 top_tags = [t[0] for t in Counter(tags).most_common(10) if len(t[0]) < 20]
                 if top_tags:
                     trending_context = "Live trending tags: " + ", ".join(top_tags)
-        except Exception as e:
-            print(f"YT API Error: {e}")
+        except httpx.RequestError as e:
+            print(f"YT API Request Error: {e}")
+        except httpx.HTTPStatusError as e:
+            print(f"YT API HTTP Error: {e.response.status_code}")
 
     # ── Delegate to the professional AI pipeline ─────────────────────────────
     result = generate_shorts_content(
