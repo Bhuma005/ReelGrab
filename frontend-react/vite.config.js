@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 9090, // Keeping the same frontend port the user is used to
+    port: 9090, host: true, // Keeping the same frontend port the user is used to
     proxy: {
       '/auth': 'http://127.0.0.1:8000',
       '/formats': 'http://127.0.0.1:8000',
