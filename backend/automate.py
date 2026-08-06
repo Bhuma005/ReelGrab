@@ -44,7 +44,8 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
     logger.info(f"🚀 Starting automation pipeline for: {req.url}")
     
     # 1. Generate optimal trending metadata & schedule via AI
-    result = generate_shorts_content(
+    result = await asyncio.to_thread(
+        generate_shorts_content,
         video_title=req.title,
         video_description=req.description,
         hashtags=req.hashtags,

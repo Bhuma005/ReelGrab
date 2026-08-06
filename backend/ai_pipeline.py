@@ -17,7 +17,7 @@ PREFERRED_MODELS = ["qwen2.5:7b", "qwen2.5:3b", "llama3.2:3b", "mistral:7b", "qw
 def _get_best_model() -> str:
     """Return the best available Ollama model from PREFERRED_MODELS."""
     try:
-        req = urllib.request.Request("http://localhost:11434/api/tags")
+        req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
         with urllib.request.urlopen(req, timeout=3) as res:
             data = json.loads(res.read())
             available = {m["name"] for m in data.get("models", [])}
@@ -139,7 +139,7 @@ def _call_ollama(model: str, user_prompt: str, temperature: float = 0.8, max_ret
     for attempt in range(max_retries):
         try:
             req = urllib.request.Request(
-                "http://localhost:11434/api/generate",
+                "http://127.0.0.1:11434/api/generate",
                 data=json.dumps(payload).encode("utf-8"),
                 method="POST",
                 headers={"Content-Type": "application/json"}

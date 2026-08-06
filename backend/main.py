@@ -363,7 +363,8 @@ async def analyze_metadata(req: AnalyzeRequest):
             print(f"YT API Error: {e}")
 
     # ── Delegate to the professional AI pipeline ─────────────────────────────
-    result = generate_shorts_content(
+    result = await asyncio.to_thread(
+        generate_shorts_content,
         video_title=req.title or "",
         video_description=req.description or "",
         hashtags=[],
