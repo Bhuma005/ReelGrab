@@ -1,5 +1,7 @@
 import os
 import time
+import asyncio
+import logging
 from typing import Optional, List, Dict
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +15,12 @@ import urllib.request
 import tempfile
 from backend.automate import router as automate_router
 from backend.youtube_auth import router as yt_auth_router
-YOUTUBE_API_KEY = "AIzaSyDhb0SPb7KyMGMluOrVSZ-SAkz2MadS8Co"
+
+# Configure Structured Logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
 app = FastAPI(title="ReelGrab")
 
@@ -44,17 +51,23 @@ class AnalyzeRequest(BaseModel):
     description: Optional[str] = ''
 
 RATE_LIMIT_STORE: Dict[str, float] = {}
-RATE_LIMIT_SECONDS = 5.0
+RATE_LIMIT_SECONDS = 0.5  # Soft limit
 
-def check_rate_limit(client_id: str):
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    client_ip = request.client.host if request.client else "unknown"
     now = time.time()
-    last_request = RATE_LIMIT_STORE.get(client_id, 0)
+    last_request = RATE_LIMIT_STORE.get(client_ip, 0)
+    
     if now - last_request < RATE_LIMIT_SECONDS:
-        raise HTTPException(
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
             status_code=429, 
-            detail=f"Rate limit exceeded. Try again in {RATE_LIMIT_SECONDS - (now - last_request):.1f} seconds."
+            content={"detail": "Too many requests. Please slow down."}
         )
-    RATE_LIMIT_STORE[client_id] = now
+    RATE_LIMIT_STORE[client_ip] = now
+    response = await call_next(request)
+    return response
 
 def validate_url(url: str):
     if not url:
@@ -77,8 +90,8 @@ async def get_formats(req: URLRequest, request: Request):
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            print(f"Fetching info for {req.url}")
-            info = ydl.extract_info(req.url, download=False)
+            logger.info(f"Fetching info for {req.url}")
+            info = await asyncio.to_thread(ydl.extract_info, req.url, download=False)
             
             if not info:
                 raise HTTPException(status_code=400, detail="Could not extract info. Video might be private or unavailable.")
@@ -156,8 +169,8 @@ async def download_video(req: DownloadRequest, request: Request):
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            print(f"Downloading format {req.format_id} for {req.url}")
-            info = ydl.extract_info(req.url, download=True)
+            logger.info(f"Downloading format {req.format_id} for {req.url}")
+            info = await asyncio.to_thread(ydl.extract_info, req.url, download=True)
             
             ext = info.get('ext', 'mp4')
             filepath = os.path.join(DOWNLOAD_DIR, f"{temp_id}.{ext}")
@@ -211,7 +224,7 @@ async def get_metadata(req: URLRequest, request: Request):
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(req.url, download=False)
+            info = await asyncio.to_thread(ydl.extract_info, req.url, download=False)
             if not info:
                 return {"title": None, "description": None, "description_clean": None, "hashtags": [], "thumbnail_url": None}
             title = info.get('title')
@@ -259,7 +272,7 @@ async def get_metadata_comments(req: URLRequest, request: Request):
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(req.url, download=False)
+            info = await asyncio.to_thread(ydl.extract_info, req.url, download=False)
             if not info:
                 return {"hashtags": [], "available": False}
             
@@ -294,7 +307,7 @@ async def download_thumbnail(req: URLRequest, request: Request):
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(req.url, download=False)
+            info = await asyncio.to_thread(ydl.extract_info, req.url, download=False)
             if not info:
                 raise HTTPException(status_code=400, detail="Could not extract info.")
             thumbnail_url = info.get('thumbnail')

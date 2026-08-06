@@ -23,6 +23,9 @@ export default function App() {
   const [authStatusError, setAuthStatusError] = useState(false);
   const [isConnectingYt, setIsConnectingYt] = useState(false);
 
+  // Ollama
+  const [ollamaStatus, setOllamaStatus] = useState('Checking...');
+
   // Automation State
   const [isAutomating, setIsAutomating] = useState(false);
   const [autoStatusText, setAutoStatusText] = useState('🚀 Automate & Post to YouTube');
@@ -49,6 +52,18 @@ export default function App() {
         console.error("Auth status error:", err);
         setAuthStatusError(true);
       });
+
+    // Check Ollama Health
+    fetch('http://127.0.0.1:11434/api/tags')
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => {
+        if (data.models && data.models.length > 0) {
+          setOllamaStatus(`✅ Local AI: ${data.models[0].name}`);
+        } else {
+          setOllamaStatus('⚠️ Local AI: No Models');
+        }
+      })
+      .catch(() => setOllamaStatus('🔴 Local AI: Offline'));
   }, []);
 
   const flash = (id) => {
@@ -330,6 +345,9 @@ export default function App() {
 
   return (
     <div className="app-container" id="app">
+      <div style={{ textAlign: 'right', fontSize: '0.75rem', position: 'absolute', top: '16px', right: '16px', color: 'var(--text-muted)' }}>
+        {ollamaStatus}
+      </div>
       <header className="header">
         <h1 className="wordmark">ReelGrab</h1>
         <p className="tagline">Personal Instagram Reel Downloader</p>
@@ -401,7 +419,7 @@ export default function App() {
                 <div id="caption-card" className="card">
                   <div className="caption-header">
                     <span className="small-label">CAPTION</span>
-                    <button className="icon-btn" onClick={() => copyToClipboard(metadata.description_clean || '')}>
+                    <button className="icon-btn" aria-label="Copy Caption" onClick={() => copyToClipboard(metadata.description_clean || '')}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.242a2 2 0 0 0-.602-1.43L16.083 2.57A2 2 0 0 0 14.685 2H10a2 2 0 0 0-2 2Z"></path>
                         <path d="M16 18v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2"></path>
