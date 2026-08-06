@@ -15,6 +15,7 @@ import urllib.request
 import tempfile
 from backend.automate import router as automate_router
 from backend.youtube_auth import router as yt_auth_router
+from backend.utils import sanitize_url
 
 # Configure Structured Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -70,17 +71,19 @@ async def rate_limit_middleware(request: Request, call_next):
     return response
 
 def validate_url(url: str):
+    url = sanitize_url(url)
     if not url:
-        raise HTTPException(status_code=400, detail="URL cannot be empty.")
+        raise HTTPException(status_code=400, detail="URL cannot be empty or invalid.")
         
     is_valid = "instagram.com" in url or "youtube.com" in url or "youtu.be" in url
     if not is_valid:
         raise HTTPException(status_code=400, detail="Invalid URL. Please provide a valid Instagram or YouTube link.")
+    return url
 
-@app.post("/formats")
+@app.post("/formats", summary="Get Video Formats", description="Returns a list of available video formats for a valid URL.")
 async def get_formats(req: URLRequest, request: Request):
     
-    validate_url(req.url)
+    req.url = validate_url(req.url)
     
     ydl_opts = {
         'quiet': True,
@@ -156,9 +159,9 @@ def cleanup_partial_downloads(temp_id: str):
         except Exception as e:
             print(f"Failed to clean up {file}: {e}")
 
-@app.post("/download")
+@app.post("/download", summary="Download specific video format", description="Downloads the video from the provided URL using the requested format ID.")
 async def download_video(req: DownloadRequest, request: Request):
-    validate_url(req.url)
+    req.url = validate_url(req.url)
     
     temp_id = str(uuid.uuid4())
     ydl_opts = {
@@ -209,11 +212,11 @@ async def download_video(req: DownloadRequest, request: Request):
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error during download.")
 
-@app.post("/metadata")
+@app.post("/metadata", summary="Fetch Video Metadata", description="Extracts basic title, description, and hashtags from a video URL.")
 async def get_metadata(req: URLRequest, request: Request):
     # validate_url handles invalid urls with HTTPException 400, but for metadata we want 200 with nulls on failure.
     try:
-        validate_url(req.url)
+        req.url = validate_url(req.url)
     except HTTPException:
         return {"title": None, "description": None, "description_clean": None, "hashtags": [], "thumbnail_url": None}
 
@@ -257,10 +260,10 @@ async def get_metadata(req: URLRequest, request: Request):
         print(f"Metadata error: {e}")
         return {"title": None, "description": None, "description_clean": None, "hashtags": [], "thumbnail_url": None}
 
-@app.post("/metadata/comments")
+@app.post("/metadata/comments", summary="Extract Comments Hashtags", description="Pulls comment sections and parses the author's own hashtags for deep viral tagging.")
 async def get_metadata_comments(req: URLRequest, request: Request):
     try:
-        validate_url(req.url)
+        req.url = validate_url(req.url)
     except HTTPException:
         return {"hashtags": [], "available": False}
 
@@ -296,9 +299,9 @@ async def get_metadata_comments(req: URLRequest, request: Request):
         print(f"Comments metadata error: {e}")
         return {"hashtags": [], "available": False}
 
-@app.post("/download-thumbnail")
+@app.post("/download-thumbnail", summary="Download Best Thumbnail", description="Retrieves and proxies the max resolution thumbnail for a video URL.")
 async def download_thumbnail(req: URLRequest, request: Request):
-    validate_url(req.url)
+    req.url = validate_url(req.url)
     
     ydl_opts = {
         'quiet': True,
@@ -331,7 +334,7 @@ async def download_thumbnail(req: URLRequest, request: Request):
         print(f"Thumbnail error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error fetching thumbnail.")
         
-@app.post("/metadata/analyze")
+@app.post("/metadata/analyze", summary="Analyze via Local GenAI", description="Delegates metadata to local Ollama instance for intelligent scheduling and descriptions.")
 async def analyze_metadata(req: AnalyzeRequest):
     import json
     from backend.ai_pipeline import generate_shorts_content

@@ -9,9 +9,13 @@ from typing import List, Optional
 import os
 import uuid
 import yt_dlp
+import asyncio
+import logging
 from pathlib import Path
 import dateutil.parser
 from datetime import datetime, date, timedelta
+
+logger = logging.getLogger(__name__)
 
 from backend.ai_pipeline import generate_shorts_content
 from cloud.enqueue import enqueue_video
@@ -35,9 +39,9 @@ class AutomateRequest(BaseModel):
     target_region: Optional[str] = "India"
 
 
-@router.post("/automate")
+@router.post("/automate", summary="Trigger Cloud Automation Pipeline", description="Downloads video, analyzes metadata via LLM, and schedules for upload to Supabase.")
 async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTasks):
-    print(f"🚀 Starting automation pipeline for: {req.url}")
+    logger.info(f"🚀 Starting automation pipeline for: {req.url}")
     
     # 1. Generate optimal trending metadata & schedule via AI
     result = generate_shorts_content(
@@ -95,7 +99,7 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
         human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
         
     except Exception as e:
-        print(f"Time parsing Error: {e}")
+        logger.error(f"Time parsing Error: {e}")
         # Fallback to right now + 2 hours if parse fails entirely
         target_dt = datetime.now() + timedelta(hours=2)
         final_iso_schedule = target_dt.astimezone().isoformat()
@@ -107,7 +111,7 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
     temp_id = str(uuid.uuid4())
     temp_filepath = str(downloads_dir / f"auto_{temp_id}.mp4")
 
-    print(f"⬇️ Downloading video to temporary file: {temp_filepath}...")
+    logger.info(f"⬇️ Downloading video to temporary file: {temp_filepath}...")
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': temp_filepath,
@@ -116,22 +120,24 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([req.url])
+            await asyncio.to_thread(ydl.download, [req.url])
     except Exception as e:
+        logger.error(f"Download failed: {e}")
         return {"status": "error", "message": f"Download failed: {str(e)}"}
 
     # 3. Enqueue directly to the Supabase Cloud Storage + Database
-    print(f"⬆️ Sending securely to Supabase Cloud...")
+    logger.info(f"⬆️ Sending securely to Supabase Cloud...")
     try:
-        new_id = enqueue_video(
+        new_id = await asyncio.to_thread(enqueue_video, 
             file_path=temp_filepath,
             title=opt_title,
             description=opt_desc,
             hashtags=opt_tags,
             schedule_time=final_iso_schedule
         )
-        print(f"✅ Video enqueued in cloud with DB ID: {new_id}")
+        logger.info(f"✅ Video enqueued in cloud with DB ID: {new_id}")
     except Exception as e:
+        logger.error(f"Cloud Upload failed: {e}")
         # Ensure we delete the file if cloud upload fails
         if os.path.exists(temp_filepath):
             os.remove(temp_filepath)
@@ -139,7 +145,7 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
 
     # 4. Clean up the local hard drive!
     if os.path.exists(temp_filepath):
-        print("🧹 Cleaning up local temporary video file...")
+        logger.info("🧹 Cleaning up local temporary video file...")
         os.remove(temp_filepath)
 
     return {

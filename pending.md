@@ -35,16 +35,16 @@ This document serves as the master tracking file for planned features, architect
 - [ ] **Local Model Fallback Dynamic Warmup**: Pre-warm smaller Ollama fallback models if primary model times out.
 - [x] **Custom Rate Limiter Middleware**: Implement standard FastAPI middleware for rate-limiting rather than per-route dictionary lookup.
 - [x] **Structured Log Rotator**: Implement Python standard `logging` with file rotation instead of plain `print()` calls.
-- [ ] **Sanitization Utilities**: Enhanced URL and user input string cleaning for file-system safety across platforms.
+- [x] **Sanitization Utilities**: Enhanced URL and user input string cleaning for file-system safety across platforms.
 
 ### ☁️ Infrastructure & Cloud (`/cloud` & `.github/workflows`)
-- [ ] **Supabase Table Indexes**: Add composite indexes on `scheduled_videos (upload_status, schedule_time)` for faster worker polling.
+- [x] **Supabase Table Indexes**: Add composite indexes on `scheduled_videos (upload_status, schedule_time)` for faster worker polling.
 - [ ] **GitHub Action Alert Webhooks**: Integrate Discord/Slack webhooks when cloud upload workers encounter persistent OAuth errors.
 - [ ] **Webhook Endpoint for Cloud Events**: Add real-time Supabase event trigger webhooks to report worker completion back to local service.
-- [ ] **Environment Secret Validator Script**: CLI utility to verify local `.env` and GitHub Secrets against required schemas before deployment.
+- [x] **Environment Secret Validator Script**: CLI utility to verify local `.env` and GitHub Secrets against required schemas before deployment.
 
 ### 📚 Documentation (`/`)
-- [ ] **API Reference Documentation**: OpenAPI / Swagger inline documentation expansion for all FastAPI routes.
+- [x] **API Reference Documentation**: OpenAPI / Swagger inline documentation expansion for all FastAPI routes.
 - [ ] **Self-Hosting Guide**: Detailed deployment guide for setup on local home servers or headless Linux instances.
 - [ ] **OAuth Setup Walkthrough**: Visual guide detailing Google Cloud OAuth Consent Screen configuration steps.
 
