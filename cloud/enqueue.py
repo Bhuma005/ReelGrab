@@ -106,6 +106,17 @@ def enqueue_video(
     result = sb.table("scheduled_videos").insert(row).execute()
     new_id = result.data[0]["id"]
     print(f"[DB]     ✅ Scheduled: id={new_id} | time={schedule_utc}")
+    
+    # Write to audit log
+    try:
+        from datetime import datetime
+        # We write to root reelgrab_audit.log
+        audit_path = Path(__file__).parent.parent / "reelgrab_audit.log"
+        with open(audit_path, "a", encoding='utf-8') as log_file:
+            log_file.write(f"[{datetime.now().isoformat()}] UPLOADED VIDEO | ID: {new_id} | Title: {title} | Storage: {storage_path} | Schedule UTC: {schedule_utc}\n")
+    except Exception as e:
+        print(f"[Log] Failed to audit log: {e}")
+        
     return new_id
 
 

@@ -410,3 +410,153 @@ async def analyze_metadata(req: AnalyzeRequest):
         "confidence_notes":      result.get("confidence_notes", ""),
         "scheduled_time":        human_readable_time,
     }
+
+@app.get("/api/dashboard/stats", summary="Get Dashboard Stats", description="Fetch cloud DB statistics for connections and saved/uploaded videos.")
+async def get_dashboard_stats():
+    from cloud.cloud_auth import get_supabase_client
+    try:
+        sb = get_supabase_client()
+        # We can do aggregate counts or just fetch them if small.
+        # Supabase Python client can give counts
+        res_pending = sb.table("scheduled_videos").select("id", count="exact").eq("upload_status", "pending").execute()
+        res_uploaded = sb.table("scheduled_videos").select("id", count="exact").eq("upload_status", "uploaded").execute()
+        res_failed = sb.table("scheduled_videos").select("id", count="exact").eq("upload_status", "failed").execute()
+        
+        return {
+            "pending": res_pending.count if getattr(res_pending, "count", None) is not None else len(res_pending.data),
+            "uploaded": res_uploaded.count if getattr(res_uploaded, "count", None) is not None else len(res_uploaded.data),
+            "failed": res_failed.count if getattr(res_failed, "count", None) is not None else len(res_failed.data)
+        }
+    except Exception as e:
+        logger.error(f"Dashboard Stats error: {e}")
+        return {"pending": 0, "uploaded": 0, "failed": 0, "error": str(e)}
+
+@app.get("/api/dashboard/videos", summary="Get Video Queue", description="Fetch recently scheduled videos for preview in the dashboard ui.")
+async def get_dashboard_videos():
+    from cloud.cloud_auth import get_supabase_client
+    try:
+        sb = get_supabase_client()
+        res = sb.table("scheduled_videos").select("*").order("schedule_time", desc=True).limit(20).execute()
+        videos = res.data
+        for v in videos:
+            if v.get("storage_path"):
+                try:
+                    signed = sb.storage.from_("reelgrab-videos").create_signed_url(v["storage_path"], 3600*24)
+                    v["public_url"] = signed.get("signedURL") or signed.get("signedUrl") or signed
+                except Exception as e:
+                    logger.error(f"Failed to generate signed url: {e}")
+        return {"videos": videos}
+    except Exception as e:
+        logger.error(f"Dashboard Videos error: {e}")
+        return {"videos": [], "error": str(e)}
+
+
+@app.delete("/api/dashboard/videos/{video_id}", summary="Delete a video", description="Deletes video from Supabase Storage and DB.")
+async def delete_dashboard_video(video_id: str):
+    from cloud.cloud_auth import get_supabase_client
+    from datetime import datetime
+    try:
+        sb = get_supabase_client()
+        # 1. Get the video record to find storage_path
+        res = sb.table("scheduled_videos").select("storage_path, title").eq("id", video_id).execute()
+        if not res.data:
+            return {"status": "error", "message": "Video not found"}
+        
+        storage_path = res.data[0].get("storage_path")
+        title = res.data[0].get("title")
+        
+        # 2. Delete from Supabase Storage bucket
+        if storage_path:
+            sb.storage.from_("reelgrab-videos").remove([storage_path])
+            
+        # 3. Delete from Supabase DB
+        sb.table("scheduled_videos").delete().eq("id", video_id).execute()
+        
+        # 4. Write to audit log for safe side
+        with open("reelgrab_audit.log", "a", encoding='utf-8') as log_file:
+            log_file.write(f"[{datetime.now().isoformat()}] DELETED VIDEO | ID: {video_id} | Title: {title} | Storage: {storage_path}\n")
+            
+        return {"status": "success", "message": "Video deleted successfully"}
+    except Exception as e:
+        logger.error(f"Failed to delete video: {e}")
+        import traceback
+        err = traceback.format_exc()
+        logger.error(f"Convert error trace: {err}")
+        return {"status": "error", "message": repr(e)}
+
+
+from pydantic import BaseModel
+class ConvertRequest(BaseModel):
+    ratio: str
+
+@app.post("/api/dashboard/videos/{video_id}/convert", summary="Convert Aspect Ratio")
+async def convert_dashboard_video(video_id: str, req: ConvertRequest):
+    from cloud.cloud_auth import get_supabase_client
+    import os
+    import subprocess
+    import uuid
+    import asyncio
+    
+    ratio_map = {
+        "9:16": (1080, 1920),
+        "1:1": (1080, 1080),
+        "4:5": (1080, 1350),
+        "16:9": (1920, 1080)
+    }
+    if req.ratio not in ratio_map:
+        return {"status": "error", "message": "Invalid ratio"}
+    W, H = ratio_map[req.ratio]
+    
+    try:
+        sb = get_supabase_client()
+        res = sb.table("scheduled_videos").select("storage_path").eq("id", video_id).execute()
+        if not res.data:
+            return {"status": "error", "message": "Video not found"}
+            
+        storage_path = res.data[0].get("storage_path")
+        
+        # 1. Download the original video completely to memory or disk
+        temp_in = f"downloads/conv_in_{uuid.uuid4().hex}.mp4"
+        temp_out = f"downloads/conv_out_{uuid.uuid4().hex}.mp4"
+        os.makedirs("downloads", exist_ok=True)
+        
+        with open(temp_in, "wb") as f:
+            res_down = sb.storage.from_("reelgrab-videos").download(storage_path)
+            f.write(res_down)
+            
+        # 2. Run FFmpeg (blur background padding technique)
+        filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,boxblur=20:20,crop={W}:{H}[bg];[bg][fg]overlay=(W-w)/2:(H-h)/2"
+        cmd = [
+            # Check if ffmpeg exists locally (downloaded by standard agent setup)
+            "backend/ffmpeg.exe" if os.path.exists("backend/ffmpeg.exe") else "ffmpeg",
+            "-y", "-i", temp_in,
+            "-lavfi", filter_complex,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:a", "copy",
+            temp_out
+        ]
+        
+        def run_ffmpeg():
+            return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+        process = await asyncio.to_thread(run_ffmpeg)
+        
+        if process.returncode != 0:
+            logger.error(f"FFmpeg error: {process.stderr.decode()}")
+            return {"status": "error", "message": "FFmpeg conversion failed: " + process.stderr.decode()[:200]}
+            
+        # 3. Upload overwritten video back to Supabase
+        with open(temp_out, "rb") as f:
+            sb.storage.from_("reelgrab-videos").update(storage_path, f, file_options={"content-type": "video/mp4", "upsert": "true"})
+            
+        # Cleanup
+        if os.path.exists(temp_in): os.remove(temp_in)
+        if os.path.exists(temp_out): os.remove(temp_out)
+        
+        return {"status": "success", "message": "Converted"}
+    except Exception as e:
+        logger.error(f"Convert error: {e}")
+        import traceback
+        err = traceback.format_exc()
+        logger.error(f"Convert error trace: {err}")
+        return {"status": "error", "message": repr(e)}

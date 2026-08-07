@@ -40,3 +40,6 @@ cloud/.env
 *.webm
 *.part
 *.ytdl
+backend/ffmpeg.exe
+
+reelgrab_audit.log

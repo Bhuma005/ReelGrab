@@ -114,7 +114,7 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
 
     logger.info(f"⬇️ Downloading video to temporary file: {temp_filepath}...")
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best',
         'outtmpl': temp_filepath,
         'quiet': True,
         'no_warnings': True,

@@ -12,7 +12,8 @@ export default defineConfig({
       '/metadata': 'http://127.0.0.1:8000',
       '/download': 'http://127.0.0.1:8000',
       '/download-thumbnail': 'http://127.0.0.1:8000',
-      '/automate': 'http://127.0.0.1:8000'
+      '/automate': 'http://127.0.0.1:8000',
+      '/api': 'http://127.0.0.1:8000'
     }
   }
 })
