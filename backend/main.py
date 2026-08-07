@@ -51,22 +51,29 @@ class AnalyzeRequest(BaseModel):
     title: Optional[str] = ''
     description: Optional[str] = ''
 
-RATE_LIMIT_STORE: Dict[str, float] = {}
-RATE_LIMIT_SECONDS = 0.5  # Soft limit
+RATE_LIMIT_STORE: Dict[str, list] = {}
+RATE_LIMIT_BURST = 5
+RATE_LIMIT_SECONDS = 1.0
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     client_ip = request.client.host if request.client else "unknown"
     now = time.time()
-    last_request = RATE_LIMIT_STORE.get(client_ip, 0)
     
-    if now - last_request < RATE_LIMIT_SECONDS:
+    # Get request timestamps for this IP
+    history = RATE_LIMIT_STORE.get(client_ip, [])
+    # Remove timestamps older than RATE_LIMIT_SECONDS
+    history = [t for t in history if now - t < RATE_LIMIT_SECONDS]
+    
+    if len(history) >= RATE_LIMIT_BURST:
         from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=429, 
             content={"detail": "Too many requests. Please slow down."}
         )
-    RATE_LIMIT_STORE[client_ip] = now
+    
+    history.append(now)
+    RATE_LIMIT_STORE[client_ip] = history
     response = await call_next(request)
     return response
 

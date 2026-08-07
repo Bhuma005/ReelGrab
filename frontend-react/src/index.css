@@ -574,5 +574,5 @@ body {
 .toast.show {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
-}# r o o t   {   w i d t h :   1 0 0 % ;   d i s p l a y :   f l e x ;   j u s t i f y - c o n t e n t :   c e n t e r ;   }  
- 
+}
+#root { width: 100%; display: flex; justify-content: center; }
