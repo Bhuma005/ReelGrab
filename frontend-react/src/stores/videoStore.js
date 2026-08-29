@@ -12,7 +12,10 @@ export const useVideoStore = create((set) => ({
   setFormats: (formats) => set({ formats }),
 
   aiAnalysisResult: null,
-  setAiAnalysisResult: (result) => set({ aiAnalysisResult: result }),
+  aiAnalysisStatus: 'idle', // 'idle', 'loading', 'success', 'error', 'timeout'
+  aiAnalysisError: null,
+  setAiAnalysisResult: (result) => set({ aiAnalysisResult: result, aiAnalysisStatus: 'success', aiAnalysisError: null }),
+  setAiAnalysisStatus: (status, error = null) => set({ aiAnalysisStatus: status, aiAnalysisError: error }),
 
   allHashtags: [],
   setAllHashtags: (hashtags) => set({ allHashtags: hashtags }),
@@ -25,6 +28,8 @@ export const useVideoStore = create((set) => ({
     metadata: null,
     formats: [],
     aiAnalysisResult: null,
+    aiAnalysisStatus: 'idle',
+    aiAnalysisError: null,
     allHashtags: [],
     isOpusMode: false,
   })

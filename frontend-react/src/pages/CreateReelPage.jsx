@@ -44,11 +44,26 @@ export default function CreateReelPage() {
         if (tags.length > 0) store.setAllHashtags(tags);
 
         if (meta.title || meta.description) {
+          store.setAiAnalysisStatus('loading');
           metadataApi.analyze(meta.title, meta.description, store.url)
             .then(analysis => {
-              if (analysis) store.setAiAnalysisResult(analysis);
+              if (analysis && analysis.success === false) {
+                 if (analysis.error?.toLowerCase().includes('timeout')) {
+                     store.setAiAnalysisStatus('timeout', analysis.error);
+                 } else {
+                     store.setAiAnalysisStatus('error', analysis.error);
+                 }
+              }
+              else if (analysis) {
+                store.setAiAnalysisResult(analysis);
+              } else {
+                store.setAiAnalysisStatus('error', 'Received empty response from AI');
+              }
             })
-            .catch(console.error);
+            .catch(err => {
+              console.error(err);
+              store.setAiAnalysisStatus('error', err.message || 'Network error during AI optimization');
+            });
         }
       });
 
@@ -341,7 +356,7 @@ export default function CreateReelPage() {
                         </div>
                       </div>
                     </>
-                  ) : (
+                  ) : store.aiAnalysisStatus === 'loading' ? (
                     <div className="space-y-6 animate-pulse">
                       <div className="space-y-2">
                         <div className="h-3 w-24 bg-surface-elevated rounded"></div>
@@ -362,7 +377,25 @@ export default function CreateReelPage() {
                         <Loader2 className="w-3 h-3 animate-spin" /> AI analyzing video content...
                       </div>
                     </div>
-                  )}
+                  ) : store.aiAnalysisStatus === 'timeout' ? (
+                    <div className="py-8 flex flex-col items-center justify-center text-center space-y-3">
+                      <div className="w-10 h-10 rounded-full bg-warning/10 flex items-center justify-center text-warning mb-2">
+                        <span className="text-xl">⏱️</span>
+                      </div>
+                      <h3 className="font-bold">AI Optimization Timed Out</h3>
+                      <p className="text-xs text-text-muted max-w-[250px]">{store.aiAnalysisError || "The AI took too long to respond. You can try again or proceed without AI metadata."}</p>
+                      <Button variant="outline" size="sm" onClick={() => handleFetch()}>Try Again</Button>
+                    </div>
+                  ) : store.aiAnalysisStatus === 'error' ? (
+                    <div className="py-8 flex flex-col items-center justify-center text-center space-y-3">
+                      <div className="w-10 h-10 rounded-full bg-danger/10 flex items-center justify-center text-danger mb-2">
+                        <span className="text-xl">⚠️</span>
+                      </div>
+                      <h3 className="font-bold">AI Optimization Failed</h3>
+                      <p className="text-xs text-text-muted max-w-[250px]">{store.aiAnalysisError || "An error occurred while generating metadata."}</p>
+                      <Button variant="outline" size="sm" onClick={() => handleFetch()}>Retry AI Analysis</Button>
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
 
