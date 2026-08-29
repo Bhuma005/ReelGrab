@@ -352,7 +352,13 @@ export default function CreateReelPage() {
 
                         <div className="flex gap-2 mt-3">
                           <Button variant="outline" className="flex-1 text-xs h-8">Edit Metadata</Button>
-                          <Button className="flex-1 text-xs h-8 bg-accent text-black hover:bg-accent/90">Schedule</Button>
+                          <Button 
+                            className="flex-1 text-xs h-8 bg-accent text-black hover:bg-accent/90"
+                            onClick={triggerAutomation}
+                            disabled={isAutomating || !appStore.isYtAuthenticated}
+                          >
+                            {isAutomating ? <Loader2 className="w-4 h-4 animate-spin" /> : "Schedule"}
+                          </Button>
                         </div>
                       </div>
                     </>
