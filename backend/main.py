@@ -408,21 +408,11 @@ async def analyze_metadata(req: AnalyzeRequest):
         return {"viral_title": "", "optimized_description": "", "youtube": [], "instagram": [], "analysis": ""}
         
     from backend.agents.orchestrator import OrchestratorAgent
-    from backend.agents.video_agent import VideoIntelligenceAgent
-    from backend.agents.content_agent import ContentIntelligenceAgent
-    from backend.agents.metadata_agent import MetadataIntelligenceAgent
-    from backend.agents.posting_agent import PostingIntelligenceAgent
-    from backend.agents.analytics_agent import AnalyticsIntelligenceAgent
-    from backend.agents.validation_agent import ValidationAgent
+    from backend.agents.master_agent import MasterAgent
 
-    # Build the orchestrator
+    # Build the orchestrator with the single unified MasterAgent
     orchestrator = OrchestratorAgent([
-        VideoIntelligenceAgent(),
-        ContentIntelligenceAgent(),
-        MetadataIntelligenceAgent(),
-        PostingIntelligenceAgent(),
-        AnalyticsIntelligenceAgent(),
-        ValidationAgent()
+        MasterAgent()
     ])
     
     # Initialize state
