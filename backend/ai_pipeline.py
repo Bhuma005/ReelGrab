@@ -11,61 +11,47 @@ import urllib.request
 from typing import Optional
 
 # ── Model selection ─────────────────────────────────────────────────────────
-# Uses the best available model; falls back down the list.
-PREFERRED_MODELS = ["qwen2.5:7b", "qwen2.5:3b", "llama3.2:3b", "mistral:7b", "qwen2:0.5b"]
-
 def _get_best_model() -> str:
-    """Return the best available Ollama model from PREFERRED_MODELS."""
-    try:
-        req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
-        with urllib.request.urlopen(req, timeout=3) as res:
-            data = json.loads(res.read())
-            available = {m["name"] for m in data.get("models", [])}
-            for model in PREFERRED_MODELS:
-                if model in available:
-                    return model
-    except Exception:
-        pass
-    return "qwen2:0.5b"   # absolute fallback
+    """Return the explicitly targeted model for ReelGrab AI processing."""
+    return "qwen2.5:7b"
 
-# ── System prompt ────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are a YouTube Shorts growth strategist and copywriter specializing in high-retention, high-CTR content. You analyze video metadata and produce a title, description, hashtags, and optimal posting time engineered to maximize views, watch time, and shares — without resorting to misleading clickbait that hurts retention.
+SYSTEM_PROMPT = """You are ReelGrab's Advanced YouTube Shorts Intelligence Engine.
 
-RULES FOR title:
-- 40–60 characters ideal (hard cap 100). Shorts titles get cut off on mobile — front-load the hook.
-- Use ONE proven pattern matched to detected_genre:
-  * Curiosity gap: "The reason nobody saw this coming"
-  * Payoff tease: "Wait for the ending"
-  * Specific stat: "3 seconds that changed everything"
-  * Direct benefit: "How to X in under a minute"
-- Do NOT use ALL CAPS words, more than one emoji, or more than one exclamation mark.
-- Do NOT promise something the video does not deliver.
-- If detected_language is not English, write the title in that language optimized for native viewers.
+Your job is to create the strongest possible YouTube Shorts metadata based on the ACTUAL VIDEO CONTENT provided in the input (raw title, description, transcript, comments, views). NEVER ask the user to invent content from nothing.
 
-RULES FOR description:
-- First line is the most important — it shows in feed/search before "more". Make it a hook.
-- 2–4 short sentences total. Plain, conversational, no corporate tone.
-- No false urgency, no ALL CAPS.
+The goal is: HIGH CLICK APPEAL + HIGH RELEVANCE + STRONG CURIOSITY + CLEAR CONTEXT + SEARCH DISCOVERABILITY
 
-RULES FOR hashtags:
-- 3–5 tags: mix of broad (#Shorts, #Drama) and niche-specific (#KDrama, #NightHasCome).
-- Return as JSON array of strings starting with #.
+============================================================
+1. METADATA REQUIREMENTS
+============================================================
+- viral_title: A short, punchy, curiosity-driven title under ~60 characters based on the actual video content. NEVER use generic fallbacks like "Video by X" or just rewrite the source username unless the creator is the actual subject.
+- optimized_description: 2-4 sentences, natural, includes a soft call-to-action, references the actual plot/content when available.
+- youtube_hashtags: 8-15 relevant hashtags optimized for YouTube Shorts discovery (mix of broad + niche tags).
+- instagram_hashtags: 15-30 relevant hashtags optimized for Instagram Reels discovery.
+- title_candidates: Generate 3 additional title strategies (e.g. search, emotional, curiosity).
+- viewer_appeal_score: Score the title (0-100) based on stopping power and curiosity.
+- title_reason: Provide 2-3 short reasons why this title is strong (e.g. "Strong curiosity gap", "Clear topic").
 
-RULES FOR optimal_schedule_time:
-- Base on detected_genre + target_audience_region.
-- Evening commute 6–9 PM local, lunch 12–1 PM, late-night 9–11 PM are strongest.
-- Comedy/entertainment skews evening; tutorial/how-to skews morning/lunch.
-- Return in 12-hour local time format (e.g. "7:30 PM").
+============================================================
+2. STRICT JSON OUTPUT
+============================================================
+You must return ONLY valid JSON. No prose, no markdown fences (like ```json), no explanations outside the JSON object.
 
-OUTPUT: Return ONLY a single valid JSON object — no preamble, no markdown fences, no explanation:
+Example Output Schema:
 {
-  "title": "",
-  "description": "",
-  "hashtags": ["", ""],
-  "optimal_schedule_time": "",
-  "schedule_reasoning": "",
-  "confidence_notes": ""
-}"""
+  "viral_title": "She Finally Realized What He Meant ❤️",
+  "optimized_description": "Watch as the realization hits! This moment changes everything for their relationship. Subscribe for more emotional movie scenes and daily shorts.",
+  "youtube_hashtags": ["#emotional", "#relationships", "#moviescenes", "#heartbreak", "#shorts", "#drama", "#love", "#breakup"],
+  "instagram_hashtags": ["#emotional", "#relationships", "#moviescenes", "#heartbreak", "#drama", "#love", "#breakup", "#couplegoals", "#sadedit", "#foryou", "#explorepage", "#viralreels", "#trending", "#cinema", "#movieclips"],
+  "title_candidates": [
+    { "strategy": "search", "title": "Saddest Movie Scene Breakup" },
+    { "strategy": "emotional", "title": "That Goodbye Still Hurts 💔" },
+    { "strategy": "curiosity", "title": "No One Expected His Answer..." }
+  ],
+  "viewer_appeal_score": 91,
+  "title_reason": ["Strong curiosity gap", "Emotional hook", "Natural conversational tone"]
+}
+"""
 
 # Lightweight prompt for small (sub-1B) models where the full system prompt is too heavy
 SYSTEM_PROMPT_LITE = """You are a YouTube Shorts copywriter. Given video info, output ONE JSON object only.
@@ -85,43 +71,76 @@ def _count_emojis(text: str) -> int:
     )
     return len(emoji_pattern.findall(text))
 
-def _validate_and_fix(parsed: dict, fallback_title: str) -> dict:
-    """Enforce hard rules on the model output."""
-    title = parsed.get("title", "").strip()
-
-    # Strip parenthetical garbage
+def _validate_and_fix(parsed: dict, fallback_title: str, scraped_hashtags: list = None) -> dict:
+    """Enforce hard rules on the model output and map to old schema for compatibility."""
+    title = parsed.get("viral_title") or parsed.get("recommended_title") or parsed.get("title", "")
     title = re.sub(r'\(.*?\)', '', title).strip()
-    # Remove jargon phrases
-    for bad in ["YouTube Shorts", "Maximal Replays", "Share Drives",
-                "Short Title:", "Output JSON", "Massive Views on"]:
-        title = title.replace(bad, "").strip(" :–-")
-    # Enforce hard cap
+    
     if len(title) > 100:
         title = title[:97].rsplit(' ', 1)[0].rstrip(" :–-") + "…"
-    # Enforce single emoji
-    if _count_emojis(title) > 1:
-        # Strip all emojis if there are too many
-        title = re.sub(
-            r'[\U00010000-\U0010ffff\U0001F600-\U0001F64F'
-            r'\U0001F300-\U0001F5FF\U0001F680-\U0001F9FF'
-            r'\u2600-\u26FF\u2700-\u27BF]', '', title).strip()
-    # Fallback if still empty
+        
     if not title:
         title = fallback_title[:97]
+        
+    description = parsed.get("optimized_description") or parsed.get("description", "")
+        
+    youtube = parsed.get("youtube_hashtags", [])
+    instagram = parsed.get("instagram_hashtags", [])
+    
+    # Ensure they are lists
+    if not isinstance(youtube, list):
+        youtube = [str(youtube)] if youtube else []
+    if not isinstance(instagram, list):
+        instagram = [str(instagram)] if instagram else []
+        
+    # Lowercase normalize for deduplication
+    seen = set()
+    if scraped_hashtags:
+        for tag in scraped_hashtags:
+            norm = tag.lower().strip()
+            if not norm.startswith("#"): norm = "#" + norm
+            seen.add(norm)
+            
+    cleaned_youtube = []
+    cleaned_instagram = []
+    
+    for tag in youtube:
+        norm = tag.lower().strip()
+        if not norm.startswith("#"): norm = "#" + norm
+        if norm not in seen:
+            seen.add(norm)
+            cleaned_youtube.append(tag.strip())
+            
+    for tag in instagram:
+        norm = tag.lower().strip()
+        if not norm.startswith("#"): norm = "#" + norm
+        if norm not in seen:
+            seen.add(norm)
+            cleaned_instagram.append(tag.strip())
+            
+    # Caps
+    cleaned_youtube = cleaned_youtube[:15]
+    cleaned_instagram = cleaned_instagram[:30]
 
-    parsed["title"] = title
+    compat_parsed = {
+        "title": title,
+        "description": description,
+        "hashtags": cleaned_youtube + cleaned_instagram, # maintain backward compatibility
+        "youtube_hashtags": cleaned_youtube,
+        "instagram_hashtags": cleaned_instagram,
+        "optimal_schedule_time": parsed.get("posting_recommendation", {}).get("time", "19:00"),
+        "schedule_reasoning": parsed.get("title_reason", [""])[0] if isinstance(parsed.get("title_reason"), list) and parsed.get("title_reason") else "",
+        "confidence_notes": "HIGH",
+    }
 
-    # Ensure hashtags are a list
-    if not isinstance(parsed.get("hashtags"), list):
-        parsed["hashtags"] = ["#Shorts", "#Viral"]
-
+    parsed.update(compat_parsed)
     return parsed
 
 def _call_ollama(model: str, user_prompt: str, temperature: float = 0.8, max_retries: int = 2) -> dict:
     """Call Ollama with retry + strict JSON validation."""
     # Use lighter system prompt for tiny models
     system = SYSTEM_PROMPT_LITE if "0.5b" in model else SYSTEM_PROMPT
-    timeout = 90.0 if "0.5b" in model else 120.0
+    timeout = 90.0 if "0.5b" in model else 300.0
 
     payload = {
         "model": model,
@@ -217,7 +236,10 @@ Generate the JSON output now."""
 
     fallback_title = video_title[:97] if video_title else "Watch This Short"
     parsed = _call_ollama(model, user_prompt, temperature)
-    parsed = _validate_and_fix(parsed, fallback_title)
+    
+    ai_failed = not parsed or (not parsed.get("viral_title") and not parsed.get("title"))
+    parsed = _validate_and_fix(parsed, fallback_title, scraped_hashtags=hashtags)
+    parsed["ai_failed"] = ai_failed
 
     # Guaranteed fallbacks for missing fields
     if not parsed.get("title"):
@@ -231,8 +253,11 @@ Generate the JSON output now."""
         parsed["optimal_schedule_time"] = "07:00 PM"
     if not parsed.get("schedule_reasoning"):
         parsed["schedule_reasoning"] = "Evening hours (6–9 PM) show peak Shorts engagement."
-    if not isinstance(parsed.get("hashtags"), list) or not parsed["hashtags"]:
-        parsed["hashtags"] = ["#Shorts", "#Viral", "#Trending"]
+    if not parsed.get("youtube_hashtags") and not parsed.get("instagram_hashtags"):
+        # If AI failed to generate hashtags, fallback to scraped
+        fallback_tags = ["#Shorts", "#Viral", "#Trending", "#fyp", "#explore", "#foryou", "#video"]
+        parsed["youtube_hashtags"] = hashtags[:15] if hashtags else fallback_tags
+        parsed["instagram_hashtags"] = hashtags[:30] if hashtags else fallback_tags
     if not parsed.get("confidence_notes"):
         parsed["confidence_notes"] = f"Generated by {model}."
     else:

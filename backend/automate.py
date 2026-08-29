@@ -16,6 +16,11 @@ import dateutil.parser
 from datetime import datetime, date, timedelta
 
 logger = logging.getLogger(__name__)
+import logging
+fh = logging.FileHandler('automate_debug.log')
+fh.setLevel(logging.DEBUG)
+logger.addHandler(fh)
+
 
 from backend.ai_pipeline import generate_shorts_content
 from cloud.enqueue import enqueue_video
@@ -125,6 +130,24 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
     except Exception as e:
         logger.error(f"Download failed: {e}")
         return {"status": "error", "message": f"Download failed: {str(e)}"}
+
+    # Apply Auto-Detect & Fit-to-Canvas (Master Requirement)
+    import sys
+    # path fixes to reach fit_to_canvas in root
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if root_dir not in sys.path:
+        sys.path.append(root_dir)
+    try:
+        from fit_to_canvas import fit_to_canvas
+        fitted_filepath = f"downloads/{uuid.uuid4().hex}_fitted.mp4"
+        logger.info("Applying Master Fit-to-Canvas 9:16 layout without cropping...")
+        await asyncio.to_thread(fit_to_canvas, temp_filepath, fitted_filepath, 1080, 1920)
+        if os.path.exists(temp_filepath): 
+            os.remove(temp_filepath)
+        temp_filepath = fitted_filepath
+    except Exception as e:
+        logger.error(f"Fit-to-canvas failed: {e}")
+        # non-fatal fallback
 
     # 3. Enqueue directly to the Supabase Cloud Storage + Database
     logger.info(f"⬆️ Sending securely to Supabase Cloud...")

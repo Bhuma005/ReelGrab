@@ -68,19 +68,40 @@ def process_pending_uploads():
 
     for video in videos:
         vid_id = video["id"]
+        library_id = video.get("library_video_id")
         title = video["title"]
         desc = video["description"]
         tags = video["hashtags"]
         storage_path = video["storage_path"]
         retry_count = video.get("retry_count", 0)
 
-        print(f"\n🎥 Processing: {title} (ID: {vid_id})")
+        print(f"\n🎥 Processing: {title} (Queue ID: {vid_id}, Library ID: {library_id})")
+        
+        if library_id:
+            lib_res = sb.table("video_library").select("youtube_video_id, status").eq("id", library_id).execute()
+            if lib_res.data:
+                lib_data = lib_res.data[0]
+                if lib_data.get("youtube_video_id") or lib_data.get("status") in ["published", "delete_pending", "cleaned"]:
+                    print(f"  ⏭️ Idempotency check: Already published to YouTube. Skipping.")
+                    now = datetime.now(timezone.utc)
+                    delete_after = (now + timedelta(days=3)).isoformat()
+                    sb.table("scheduled_videos").update({
+                        "upload_status": "uploaded",
+                        "delete_after": delete_after
+                    }).eq("id", vid_id).execute()
+                    continue
 
-        # Mark as uploading to prevent parallel double-uploads if jobs overlap
+        # Mark as uploading
         sb.table("scheduled_videos").update({"upload_status": "uploading"}).eq("id", vid_id).execute()
+        if library_id:
+            sb.table("video_library").update({"status": "uploading"}).eq("id", library_id).execute()
+            sb.table("video_activity_log").insert({
+                "video_id": library_id,
+                "event_type": "UPLOAD_STARTED",
+                "message": "Started YouTube upload process"
+            }).execute()
 
         try:
-            # 2. Download from Supabase Storage
             print(f"  ⬇️ Downloading {storage_path} from Supabase...")
             file_data = sb.storage.from_(BUCKET).download(storage_path)
             
@@ -88,10 +109,7 @@ def process_pending_uploads():
                 tmp.write(file_data)
                 local_path = tmp.name
 
-            # 3. Upload to YouTube
             print(f"  ⬆️ Uploading to YouTube...")
-            
-            # Combine hashtags into description per standard practice
             full_desc = desc
             if tags:
                 full_desc += "\n\n" + " ".join(tags)
@@ -101,10 +119,10 @@ def process_pending_uploads():
                     "title": title,
                     "description": full_desc,
                     "tags": tags,
-                    "categoryId": "24",  # Entertainment
+                    "categoryId": "24",
                 },
                 "status": {
-                    "privacyStatus": "public",  # Standard for scheduled release
+                    "privacyStatus": "public",
                     "madeForKids": False,
                     "selfDeclaredMadeForKids": False,
                 }
@@ -124,12 +142,11 @@ def process_pending_uploads():
                     print(f"  ... Uploaded {int(status.progress() * 100)}%")
 
             yt_id = response.get("id")
+            yt_url = f"https://youtube.com/shorts/{yt_id}"
             print(f"  ✅ Upload successful! YouTube Video ID: {yt_id}")
 
-            # 4. Clean up the local temp file
             os.remove(local_path)
 
-            # 5. Update Database on Success
             now = datetime.now(timezone.utc)
             delete_after = (now + timedelta(days=3)).isoformat()
             
@@ -140,6 +157,20 @@ def process_pending_uploads():
                 "delete_after": delete_after,
                 "last_error": None
             }).eq("id", vid_id).execute()
+            
+            if library_id:
+                sb.table("video_library").update({
+                    "status": "published",
+                    "upload_status": "uploaded",
+                    "youtube_video_id": yt_id,
+                    "youtube_url": yt_url,
+                    "uploaded_at": now.isoformat()
+                }).eq("id", library_id).execute()
+                sb.table("video_activity_log").insert({
+                    "video_id": library_id,
+                    "event_type": "YOUTUBE_UPLOAD_SUCCESS",
+                    "message": f"Successfully published. ID: {yt_id}"
+                }).execute()
 
         except Exception as e:
             err_msg = str(e)
@@ -154,6 +185,13 @@ def process_pending_uploads():
                     "retry_count": retry_count,
                     "last_error": err_msg
                 }).eq("id", vid_id).execute()
+                if library_id:
+                    sb.table("video_library").update({"status": "failed", "error_message": err_msg}).eq("id", library_id).execute()
+                    sb.table("video_activity_log").insert({
+                        "video_id": library_id,
+                        "event_type": "YOUTUBE_UPLOAD_FAILED",
+                        "message": f"Failed after 3 retries: {err_msg}"
+                    }).execute()
             else:
                 print(f"  ⚠️ Will retry on next run ({retry_count}/3).")
                 sb.table("scheduled_videos").update({
@@ -161,7 +199,8 @@ def process_pending_uploads():
                     "retry_count": retry_count,
                     "last_error": err_msg
                 }).eq("id", vid_id).execute()
-
+                if library_id:
+                    sb.table("video_library").update({"status": "scheduled"}).eq("id", library_id).execute()
 
 if __name__ == "__main__":
     process_pending_uploads()

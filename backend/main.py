@@ -50,6 +50,7 @@ class DownloadRequest(BaseModel):
 class AnalyzeRequest(BaseModel):
     title: Optional[str] = ''
     description: Optional[str] = ''
+    url: Optional[str] = ''
 
 RATE_LIMIT_STORE: Dict[str, list] = {}
 RATE_LIMIT_BURST = 5
@@ -107,47 +108,78 @@ async def get_formats(req: URLRequest, request: Request):
                 raise HTTPException(status_code=400, detail="Could not extract info. Video might be private or unavailable.")
             
             formats = info.get('formats', [])
+            import math
+            def get_aspect_ratio(w, h):
+                if not w or not h: return "Unknown"
+                # Handle common slight deviations
+                if w == 1080 and h == 1920: return "9:16"
+                if w == 1920 and h == 1080: return "16:9"
+                if w == 1080 and h == 1350: return "4:5"
+                if w == 1080 and h == 1080: return "1:1"
+                g = math.gcd(w, h)
+                return f"{w//g}:{h//g}"
+
+            formats = info.get('formats', [])
             resolutions = []
             
             for f in formats:
                 if f.get('vcodec') != 'none':
-                    width = f.get('width')
-                    height = f.get('height')
-                    resolution_text = f"{width}x{height}" if width and height else f.get('format_note', 'Unknown')
+                    w = f.get('width', 0)
+                    h = f.get('height', 0)
+                    fps = f.get('fps', 0)
+                    vcodec = f.get('vcodec', 'unknown')
+                    acodec = f.get('acodec', 'none')
                     
-                    actual_filesize = f.get('filesize') or f.get('filesize_approx')
-                    if not actual_filesize and f.get('url'):
-                        try:
-                            req_head = urllib.request.Request(f.get('url'), method='HEAD')
-                            with urllib.request.urlopen(req_head, timeout=2.0) as res_head:
-                                cl = res_head.headers.get('Content-Length')
-                                if cl and cl.isdigit():
-                                    actual_filesize = int(cl)
-                        except Exception:
-                            pass
-                            
+                    has_audio = acodec != 'none'
+                    # If video-only, we request yt-dlp to merge best audio
+                    fmt_id = f.get('format_id')
+                    if not has_audio:
+                        fmt_id = f"{fmt_id}+bestaudio"
+                        
                     resolutions.append({
-                        "format_id": f.get('format_id'),
-                        "resolution": resolution_text,
-                        "ext": f.get('ext'),
-                        "filesize": actual_filesize,
-                        "width": width or 0,
-                        "height": height or 0
+                        "format_id": fmt_id,
+                        "resolution": f"{w}x{h}" if w and h else f.get('format_note', 'Unknown'),
+                        "width": w,
+                        "height": h,
+                        "aspect_ratio": get_aspect_ratio(w, h),
+                        "fps": fps,
+                        "ext": f.get('ext', 'mp4'),
+                        "vcodec": vcodec,
+                        "has_audio": has_audio,
+                        "filesize": f.get('filesize') or f.get('filesize_approx', 0),
+                        "is_original": False
                     })
             
             # Sort by resolution (width*height) descending
             resolutions.sort(key=lambda x: (x['width'] * x['height']), reverse=True)
             
-            # Remove duplicates based on resolution and ext
+            # Remove duplicates based on resolution
             unique_resolutions = []
             seen = set()
             for r in resolutions:
-                key = f"{r['resolution']}_{r['ext']}"
-                if key not in seen:
+                key = f"{r['width']}x{r['height']}_{r['fps']}"
+                if key not in seen and r['width'] > 0:
                     seen.add(key)
                     unique_resolutions.append(r)
+
+            # Add the "Original Source" as the absolute first option
+            best_w = info.get('width') or (unique_resolutions[0]['width'] if unique_resolutions else 0)
+            best_h = info.get('height') or (unique_resolutions[0]['height'] if unique_resolutions else 0)
+            best_fps = info.get('fps') or (unique_resolutions[0]['fps'] if unique_resolutions else 0)
             
-            return unique_resolutions
+            original_format = {
+                "format_id": "bestvideo+bestaudio/best",
+                "resolution": f"{best_w}x{best_h}" if best_w else "Best",
+                "width": best_w,
+                "height": best_h,
+                "aspect_ratio": get_aspect_ratio(best_w, best_h),
+                "fps": best_fps,
+                "ext": "mp4", # yt-dlp will merge to mp4 by default or mkv if needed, we can force mp4
+                "has_audio": True,
+                "is_original": True
+            }
+            
+            return [original_format] + unique_resolutions
             
     except yt_dlp.utils.DownloadError as e:
         print(f"yt-dlp error: {e}")
@@ -204,6 +236,31 @@ async def download_video(req: DownloadRequest, request: Request):
                     
             os.rename(filepath, final_filepath)
             
+            # Run FFprobe verification for audit logs
+            import subprocess
+            import json
+            try:
+                cmd = [
+                    "backend/ffprobe.exe" if os.path.exists("backend/ffprobe.exe") else "ffprobe",
+                    "-v", "error", "-select_streams", "v:0",
+                    "-show_entries", "stream=width,height,display_aspect_ratio",
+                    "-of", "json", final_filepath
+                ]
+                probe_res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if probe_res.returncode == 0:
+                    probe_data = json.loads(probe_res.stdout)
+                    streams = probe_data.get('streams', [])
+                    if streams:
+                        v_stream = streams[0]
+                        out_w = v_stream.get('width', 0)
+                        out_h = v_stream.get('height', 0)
+                        dar = v_stream.get('display_aspect_ratio', 'Unknown')
+                        from datetime import datetime
+                        with open("reelgrab_audit.log", "a", encoding='utf-8') as log_file:
+                            log_file.write(f"[{datetime.now().isoformat()}] DOWNLOAD VERIFIED | OUTPUT: {out_w}x{out_h} | DAR: {dar} | MODE: original | FILE: {final_filename}\n")
+            except Exception as e:
+                logger.error(f"FFprobe verification failed: {e}")
+
             return FileResponse(
                 path=final_filepath, 
                 media_type=f"video/{final_filepath.split('.')[-1]}", 
@@ -344,72 +401,89 @@ async def download_thumbnail(req: URLRequest, request: Request):
 @app.post("/metadata/analyze", summary="Analyze via Local GenAI", description="Delegates metadata to local Ollama instance for intelligent scheduling and descriptions.")
 async def analyze_metadata(req: AnalyzeRequest):
     import json
-    from backend.ai_pipeline import generate_shorts_content
+    
+    # Check if empty
     text = f"{req.title or ''}\n{req.description or ''}".strip()
-    if not text:
+    if not text and not req.url:
         return {"viral_title": "", "optimized_description": "", "youtube": [], "instagram": [], "analysis": ""}
         
-    # ── Fetch real-time trending tags for extra context ──────────────────────
-    trending_context = ""
-    if YOUTUBE_API_KEY:
-        try:
-            yt_url = (
-                f"https://youtube.googleapis.com/youtube/v3/videos"
-                f"?part=snippet&chart=mostPopular&regionCode=IN&maxResults=20&key={YOUTUBE_API_KEY}"
-            )
-            with urllib.request.urlopen(urllib.request.Request(yt_url), timeout=3.0) as yt_res:
-                yt_data = json.loads(yt_res.read())
-                tags = []
-                for item in yt_data.get('items', []):
-                    tags.extend(item.get('snippet', {}).get('tags', []))
-                from collections import Counter
-                top_tags = [t[0] for t in Counter(tags).most_common(10) if len(t[0]) < 20]
-                if top_tags:
-                    trending_context = "Live trending tags: " + ", ".join(top_tags)
-        except Exception as e:
-            print(f"YT API Error: {e}")
+    from backend.agents.orchestrator import OrchestratorAgent
+    from backend.agents.video_agent import VideoIntelligenceAgent
+    from backend.agents.content_agent import ContentIntelligenceAgent
+    from backend.agents.metadata_agent import MetadataIntelligenceAgent
+    from backend.agents.posting_agent import PostingIntelligenceAgent
+    from backend.agents.analytics_agent import AnalyticsIntelligenceAgent
+    from backend.agents.validation_agent import ValidationAgent
 
-    # ── Delegate to the professional AI pipeline ─────────────────────────────
-    result = await asyncio.to_thread(
-        generate_shorts_content,
-        video_title=req.title or "",
-        video_description=req.description or "",
-        hashtags=[],
-        transcript=(req.description or "")[:600] + ("\n" + trending_context if trending_context else ""),
-        target_region="India",
-        temperature=0.8,
-    )
-
-    # Map new output format to what the frontend expects
-    all_hashtags = result.get("hashtags", [])
-    # Split hashtags evenly between youtube/instagram chips
-    mid = max(3, len(all_hashtags) // 2)
-    youtube_tags  = all_hashtags[:mid]
-    instagram_tags = all_hashtags[mid:] or all_hashtags[:3]
-
-    sched_time = result.get("optimal_schedule_time", "07:30 PM")
+    # Build the orchestrator
+    orchestrator = OrchestratorAgent([
+        VideoIntelligenceAgent(),
+        ContentIntelligenceAgent(),
+        MetadataIntelligenceAgent(),
+        PostingIntelligenceAgent(),
+        AnalyticsIntelligenceAgent(),
+        ValidationAgent()
+    ])
     
-    import dateutil.parser
-    from datetime import datetime, date, timedelta
-    try:
-        parsed_time = dateutil.parser.parse(sched_time).time()
-        now = datetime.now()
-        target_dt = datetime.combine(now.date(), parsed_time)
-        if target_dt < now:
-            target_dt += timedelta(days=1)
-        human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
-    except Exception:
-        human_readable_time = sched_time # fallback to raw string
+    # Initialize state
+    initial_state = {
+        "raw_title": req.title or "",
+        "raw_description": req.description or "",
+        "transcript_text": req.description or "", # Pseudo-transcript fallback
+        "url": req.url or ""
+    }
+    
+    # Execute workflow in background thread
+    final_state = await asyncio.to_thread(orchestrator.execute, initial_state)
+    
+    # Map state back to old API schema for backward compatibility
+    metadata = final_state.get("metadata", {})
+    posting = final_state.get("posting", {})
+    analytics = final_state.get("analytics", {})
+    
+    best_title = metadata.get("best_title", req.title)
+    if not best_title: best_title = req.title
+    
+    description = metadata.get("description", req.description)
+    youtube_tags = metadata.get("youtube_hashtags", [])
+    instagram_tags = metadata.get("instagram_hashtags", [])
+    ai_failed = metadata.get("status") == "failed"
+    
+    # Recreate the "raw_result" structure expected by the frontend
+    result = {
+        "title": best_title,
+        "description": description,
+        "youtube_hashtags": youtube_tags,
+        "instagram_hashtags": instagram_tags,
+        "title_candidates": metadata.get("title_candidates", []),
+        "viewer_appeal_score": metadata.get("viewer_appeal_score", 0),
+        "title_reason": metadata.get("title_reason", ""),
+        "posting_recommendation": posting,
+        "ai_failed": ai_failed,
+        "agent_workflow_state": final_state.data # pass full agent state to UI
+    }
 
     return {
-        "viral_title":           result.get("title", ""),
-        "optimized_description": result.get("description", ""),
+        "viral_title":           best_title,
+        "optimized_description": description,
         "youtube":               youtube_tags,
         "instagram":             instagram_tags,
-        "analysis":              result.get("schedule_reasoning", ""),
-        "confidence_notes":      result.get("confidence_notes", ""),
-        "scheduled_time":        human_readable_time,
+        "analysis":              analytics.get("reasoning", posting.get("reason", "")),
+        "confidence_notes":      posting.get("confidence", "LOW"),
+        "scheduled_time":        posting.get("human_readable_time", "07:30 PM"),
+        "raw_result":            result,
+        "ai_failed":             ai_failed
     }
+
+@app.get("/api/scheduling/recommendation", summary="Get Posting Intelligence Recommendation")
+async def get_scheduling_recommendation(topic: str = None, category: str = None):
+    from backend.posting_engine import get_best_posting_time
+    try:
+        intel = get_best_posting_time(topic=topic, category=category)
+        return intel
+    except Exception as e:
+        logger.error(f"Scheduling recommendation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to calculate scheduling recommendation.")
 
 @app.get("/api/dashboard/stats", summary="Get Dashboard Stats", description="Fetch cloud DB statistics for connections and saved/uploaded videos.")
 async def get_dashboard_stats():
@@ -436,15 +510,16 @@ async def get_dashboard_videos():
     from cloud.cloud_auth import get_supabase_client
     try:
         sb = get_supabase_client()
-        res = sb.table("scheduled_videos").select("*").order("schedule_time", desc=True).limit(20).execute()
+        res = sb.table("video_library").select("*").order("created_at", desc=True).limit(20).execute()
         videos = res.data
         for v in videos:
-            if v.get("storage_path"):
+            if v.get("storage_path") and v.get("status") not in ['cleaned', 'published']:
                 try:
                     signed = sb.storage.from_("reelgrab-videos").create_signed_url(v["storage_path"], 3600*24)
                     v["public_url"] = signed.get("signedURL") or signed.get("signedUrl") or signed
                 except Exception as e:
                     logger.error(f"Failed to generate signed url: {e}")
+            v["storage_exists"] = bool(v.get("storage_path"))
         return {"videos": videos}
     except Exception as e:
         logger.error(f"Dashboard Videos error: {e}")
@@ -457,22 +532,22 @@ async def delete_dashboard_video(video_id: str):
     from datetime import datetime
     try:
         sb = get_supabase_client()
-        # 1. Get the video record to find storage_path
-        res = sb.table("scheduled_videos").select("storage_path, title").eq("id", video_id).execute()
+        res = sb.table("video_library").select("storage_path, title").eq("id", video_id).execute()
         if not res.data:
             return {"status": "error", "message": "Video not found"}
         
         storage_path = res.data[0].get("storage_path")
         title = res.data[0].get("title")
         
-        # 2. Delete from Supabase Storage bucket
         if storage_path:
-            sb.storage.from_("reelgrab-videos").remove([storage_path])
+            try:
+                sb.storage.from_("reelgrab-videos").remove([storage_path])
+            except Exception as e:
+                logger.error(f"Failed to delete from storage: {e}")
             
-        # 3. Delete from Supabase DB
-        sb.table("scheduled_videos").delete().eq("id", video_id).execute()
+        sb.table("scheduled_videos").delete().eq("library_video_id", video_id).execute()
+        sb.table("video_library").delete().eq("id", video_id).execute()
         
-        # 4. Write to audit log for safe side
         with open("reelgrab_audit.log", "a", encoding='utf-8') as log_file:
             log_file.write(f"[{datetime.now().isoformat()}] DELETED VIDEO | ID: {video_id} | Title: {title} | Storage: {storage_path}\n")
             
@@ -509,7 +584,7 @@ async def convert_dashboard_video(video_id: str, req: ConvertRequest):
     
     try:
         sb = get_supabase_client()
-        res = sb.table("scheduled_videos").select("storage_path").eq("id", video_id).execute()
+        res = sb.table("video_library").select("storage_path").eq("id", video_id).execute()
         if not res.data:
             return {"status": "error", "message": "Video not found"}
             
@@ -525,13 +600,14 @@ async def convert_dashboard_video(video_id: str, req: ConvertRequest):
             f.write(res_down)
             
         # 2. Run FFmpeg (blur background padding technique)
-        filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,boxblur=20:20,crop={W}:{H}[bg];[bg][fg]overlay=(W-w)/2:(H-h)/2"
+        filter_complex = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease[fg];[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,boxblur=20:20,crop={W}:{H}[bg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,setdar={W}/{H}"
         cmd = [
             # Check if ffmpeg exists locally (downloaded by standard agent setup)
             "backend/ffmpeg.exe" if os.path.exists("backend/ffmpeg.exe") else "ffmpeg",
             "-y", "-i", temp_in,
             "-lavfi", filter_complex,
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
             "-c:a", "copy",
             temp_out
         ]
@@ -546,8 +622,9 @@ async def convert_dashboard_video(video_id: str, req: ConvertRequest):
             return {"status": "error", "message": "FFmpeg conversion failed: " + process.stderr.decode()[:200]}
             
         # 3. Upload overwritten video back to Supabase
+        sb.storage.from_("reelgrab-videos").remove([storage_path])
         with open(temp_out, "rb") as f:
-            sb.storage.from_("reelgrab-videos").update(storage_path, f, file_options={"content-type": "video/mp4", "upsert": "true"})
+            sb.storage.from_("reelgrab-videos").upload(storage_path, f, file_options={"content-type": "video/mp4"})
             
         # Cleanup
         if os.path.exists(temp_in): os.remove(temp_in)
@@ -560,3 +637,146 @@ async def convert_dashboard_video(video_id: str, req: ConvertRequest):
         err = traceback.format_exc()
         logger.error(f"Convert error trace: {err}")
         return {"status": "error", "message": repr(e)}
+
+
+@app.post("/api/dashboard/videos/{video_id}/publish", summary="Force Publish to YouTube immediately")
+async def publish_dashboard_video(video_id: str):
+    from cloud.cloud_auth import get_supabase_client
+    import os
+    import tempfile
+    from datetime import datetime, timezone, timedelta
+    
+    try:
+        try:
+            from googleapiclient.discovery import build
+            from googleapiclient.http import MediaFileUpload
+            from google.oauth2.credentials import Credentials
+        except ImportError:
+            return {"status": "error", "message": "Google API packages missing (pip install google-api-python-client google-auth-oauthlib)"}
+
+        sb = get_supabase_client()
+        res = sb.table("video_library").select("*").eq("id", video_id).execute()
+        if not res.data:
+            return {"status": "error", "message": "Video not found in library"}
+            
+        video = res.data[0]
+        if video.get("status") in ["published", "delete_pending", "cleaned"] or video.get("youtube_video_id"):
+            return {"status": "error", "message": "Already published!"}
+            
+        if not video.get("storage_path"):
+            return {"status": "error", "message": "Video file is missing from cloud storage"}
+            
+        sb.table("video_activity_log").insert({
+            "video_id": video_id,
+            "event_type": "UPLOAD_STARTED",
+            "message": "Manual publish triggered from dashboard"
+        }).execute()
+            
+        print("Downloading video for publish:", video.get("storage_path"))
+        file_bytes = sb.storage.from_("reelgrab-videos").download(video.get("storage_path"))
+        
+        from cloud.cloud_auth import get_youtube_creds
+        try:
+            creds_data = get_youtube_creds()
+        except:
+            return {"status": "error", "message": "YouTube Credentials not configured in .env"}
+            
+        creds = Credentials(
+          token=None,
+          refresh_token=creds_data["refresh_token"],
+          token_uri="https://oauth2.googleapis.com/token",
+          client_id=creds_data["client_id"],
+          client_secret=creds_data["client_secret"]
+        )
+        yt_service = build("youtube", "v3", credentials=creds)
+        
+        tags = video.get("hashtags", [])
+        if isinstance(tags, str): tags = tags.replace("#", "").split()
+        else: tags = [t.replace("#", "") for t in tags]
+        
+        tag_str = " ".join([f"#{t}" for t in tags])
+        full_desc = f"{video.get('description', '')}\n\n{tag_str}".strip()
+        
+        body = {
+              "snippet": {
+                  "title": video.get("title", "ReelGrab Upload"),
+                  "description": full_desc,
+                  "tags": tags,
+                  "categoryId": "22"
+              },
+              "status": {
+                  "privacyStatus": "public",
+                  "madeForKids": False,
+                  "selfDeclaredMadeForKids": False
+              }
+        }
+        
+        # Create temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+            
+        try:
+            media = MediaFileUpload(tmp_path, mimetype="video/mp4", resumable=True)
+            request = yt_service.videos().insert(
+                part="snippet,status",
+                body=body,
+                media_body=media
+            )
+            response = None
+            while response is None:
+                status, response = request.next_chunk()
+                
+            yt_id = response.get("id")
+            yt_url = f"https://youtube.com/shorts/{yt_id}"
+            now = datetime.now(timezone.utc).isoformat()
+            
+            sb.table("video_library").update({
+                "status": "published",
+                "upload_status": "uploaded",
+                "youtube_video_id": yt_id,
+                "youtube_url": yt_url,
+                "uploaded_at": now
+            }).eq("id", video_id).execute()
+            
+            sb.table("video_activity_log").insert({
+                "video_id": video_id,
+                "event_type": "YOUTUBE_UPLOAD_SUCCESS",
+                "message": f"Successfully published via dashboard. ID: {yt_id}"
+            }).execute()
+            
+            # Since we manually published, let's mark it as uploaded in the queue so it gets cleaned up
+            now_dt = datetime.now(timezone.utc)
+            delete_after = (now_dt + timedelta(days=3)).isoformat()
+            sb.table("scheduled_videos").update({
+                "upload_status": "uploaded",
+                "delete_after": delete_after,
+                "youtube_video_id": yt_id,
+                "uploaded_at": now
+            }).eq("library_video_id", video_id).execute()
+            
+            return {"status": "success", "message": "Published"}
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        
+    except Exception as e:
+        import traceback
+        logger.error(f"Publish error: {e}")
+        return {"status": "error", "message": str(e) + " - " + traceback.format_exc()[:200]}
+
+
+@app.get("/api/dashboard/logs", summary="Get audit logs", description="Returns the audit log history.")
+async def get_dashboard_logs():
+    import os
+    logs = []
+    log_path = "reelgrab_audit.log"
+    if os.path.exists(log_path):
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                logs.append(line)
+    logs.reverse()
+    return {"logs": logs}

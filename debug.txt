@@ -62,86 +62,62 @@ def enqueue_video(
     schedule_time: str,
 ) -> str:
     """
-    Creates permanent Library record, uploads file to Supabase Storage, 
-    inserts queue row, and logs activity.
+    Uploads file to Supabase Storage, inserts DB row, returns the new video's UUID.
+    schedule_time: ISO 8601 string (any tz) — stored as UTC in the DB.
     """
     sb = get_supabase_client()
 
+    # ── 1. Parse and normalise schedule_time to UTC ───────────────────────────
     dt = datetime.fromisoformat(schedule_time)
     if dt.tzinfo is None:
         print("⚠️  schedule_time has no timezone — assuming UTC.")
         dt = dt.replace(tzinfo=timezone.utc)
     schedule_utc = dt.astimezone(timezone.utc).isoformat()
 
+    # ── 2. Upload file to Supabase Storage ────────────────────────────────────
     file_path = Path(file_path)
     if not file_path.exists():
         raise FileNotFoundError(f"Video file not found: {file_path}")
 
     storage_name = f"{uuid.uuid4().hex}_{file_path.name}"
     storage_path = f"videos/{storage_name}"
-    
-    # ── 1. Create Permanent Library Record ─────────────────────────────────────
-    print("[DB] Creating permanent library record...")
-    lib_row = {
-        "title": title,
-        "description": description,
-        "hashtags": hashtags,
-        "schedule_time": schedule_utc,
-        "status": "scheduled",
-        "storage_path": storage_path
-    }
-    lib_res = sb.table("video_library").insert(lib_row).execute()
-    library_id = lib_res.data[0]["id"]
-    print(f"[DB] ✅ Library record created: {library_id}")
 
-    # ── 2. Log VIDEO_CREATED ──────────────────────────────────────────────────
-    sb.table("video_activity_log").insert({
-        "video_id": library_id,
-        "event_type": "VIDEO_CREATED",
-        "message": f"Library record created for {title}"
-    }).execute()
-
-    # ── 3. Upload file to Supabase Storage ────────────────────────────────────
     print(f"[Upload] Uploading {file_path.name} → {storage_path} ...")
-    try:
-        with open(file_path, "rb") as f:
-            sb.storage.from_(BUCKET).upload(
-                path=storage_path,
-                file=f,
-                file_options={"content-type": "video/mp4"},
-            )
-        print(f"[Upload] ✅ Uploaded to storage: {storage_path}")
-    except Exception as e:
-        print(f"[Upload] ❌ Upload failed: {e}")
-        print(f"[DB] Rolling back library record {library_id}...")
-        # Safe cleanup of the orphaned library record since storage failed
-        sb.table("video_library").delete().eq("id", library_id).execute()
-        raise e
+    with open(file_path, "rb") as f:
+        sb.storage.from_(BUCKET).upload(
+            path=storage_path,
+            file=f,
+            file_options={"content-type": "video/mp4"},
+        )
+    print(f"[Upload] ✅ Uploaded to storage: {storage_path}")
 
+    # ── 3. Check storage usage after upload ───────────────────────────────────
     _check_bucket_usage(sb)
 
-    # ── 4. Insert Queue Row (scheduled_videos) ────────────────────────────────
-    queue_row = {
+    # ── 4. Insert DB row ──────────────────────────────────────────────────────
+    row = {
         "title":         title,
         "description":   description,
         "hashtags":      hashtags,
         "storage_path":  storage_path,
         "schedule_time": schedule_utc,
         "upload_status": "pending",
-        "library_video_id": library_id
     }
-    queue_res = sb.table("scheduled_videos").insert(queue_row).execute()
-    queue_id = queue_res.data[0]["id"]
-    print(f"[DB] ✅ Queued in scheduled_videos: {queue_id}")
-
-    # ── 5. Log VIDEO_SCHEDULED ────────────────────────────────────────────────
-    sb.table("video_activity_log").insert({
-        "video_id": library_id,
-        "event_type": "VIDEO_SCHEDULED",
-        "message": f"Video scheduled for {schedule_utc} (Queue ID: {queue_id})"
-    }).execute()
+    result = sb.table("scheduled_videos").insert(row).execute()
+    new_id = result.data[0]["id"]
+    print(f"[DB]     ✅ Scheduled: id={new_id} | time={schedule_utc}")
     
-    return library_id
+    # Write to audit log
+    try:
+        from datetime import datetime
+        # We write to root reelgrab_audit.log
+        audit_path = Path(__file__).parent.parent / "reelgrab_audit.log"
+        with open(audit_path, "a", encoding='utf-8') as log_file:
+            log_file.write(f"[{datetime.now().isoformat()}] UPLOADED VIDEO | ID: {new_id} | Title: {title} | Storage: {storage_path} | Schedule UTC: {schedule_utc}\n")
+    except Exception as e:
+        print(f"[Log] Failed to audit log: {e}")
+        
+    return new_id
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
@@ -162,4 +138,4 @@ if __name__ == "__main__":
         hashtags=tags,
         schedule_time=args.schedule,
     )
-    print(f"\n✅ Done — video enqueued to library: {new_id}")
+    print(f"\n✅ Done — video enqueued with id: {new_id}")

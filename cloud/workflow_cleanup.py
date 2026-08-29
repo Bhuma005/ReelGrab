@@ -38,19 +38,33 @@ def process_cleanup():
 
     for video in videos:
         vid_id = video["id"]
+        library_id = video.get("library_video_id")
         title = video["title"]
         yt_id = video.get("youtube_video_id", "UNKNOWN")
         storage_path = video["storage_path"]
         uploaded_at = video.get("uploaded_at")
 
-        print(f"\n🧹 Cleaning up: {title} (ID: {vid_id})")
+        print(f"\n🧹 Cleaning up: {title} (Queue ID: {vid_id}, Library ID: {library_id})")
+
+        # Idempotency check
+        if not storage_path:
+            print(f"  ⏭️ Idempotency check: storage_path already NULL. Skipping storage delete.")
+            sb.table("scheduled_videos").delete().eq("id", vid_id).execute()
+            continue
+
+        if library_id:
+            sb.table("video_activity_log").insert({
+                "video_id": library_id,
+                "event_type": "STORAGE_DELETE_STARTED",
+                "message": "Attempting to delete cloud video file"
+            }).execute()
 
         try:
-            # 2. Delete file from Supabase Storage
             print(f"  🗑️ Deleting file from storage: {storage_path}")
+            # The Supabase storage remove API returns a list of deleted files.
+            # If the file is already gone, it might return empty or error. We proceed anyway.
             sb.storage.from_(BUCKET).remove([storage_path])
 
-            # 3. Insert row into videos_audit_log for our soft delete
             print(f"  📝 Creating audit log record for YouTube ID: {yt_id}")
             audit_row = {
                 "title": title,
@@ -59,8 +73,19 @@ def process_cleanup():
                 "deleted_at": datetime.now(timezone.utc).isoformat(),
             }
             sb.table("videos_audit_log").insert(audit_row).execute()
+            
+            if library_id:
+                sb.table("video_library").update({
+                    "storage_path": None,
+                    "storage_deleted_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "cleaned"
+                }).eq("id", library_id).execute()
+                sb.table("video_activity_log").insert({
+                    "video_id": library_id,
+                    "event_type": "STORAGE_DELETE_SUCCESS",
+                    "message": "Cloud video file permanently deleted"
+                }).execute()
 
-            # 4. Delete the original row from scheduled_videos
             print(f"  ✂️ Removing row from scheduled_videos table")
             sb.table("scheduled_videos").delete().eq("id", vid_id).execute()
 
@@ -68,6 +93,15 @@ def process_cleanup():
 
         except Exception as e:
             print(f"  ❌ Cleanup failed: {str(e)}")
+            if library_id:
+                sb.table("video_library").update({
+                    "status": "delete_pending"
+                }).eq("id", library_id).execute()
+                sb.table("video_activity_log").insert({
+                    "video_id": library_id,
+                    "event_type": "STORAGE_DELETE_FAILED",
+                    "message": f"Storage cleanup failed: {str(e)}"
+                }).execute()
 
 if __name__ == "__main__":
     process_cleanup()
