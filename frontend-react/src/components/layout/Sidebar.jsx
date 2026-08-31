@@ -1,3 +1,4 @@
+import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAppStore } from '../../stores/appStore';
 import { LayoutDashboard, Video, Library, Calendar, Activity, Link2, Settings, Terminal, X } from 'lucide-react';
