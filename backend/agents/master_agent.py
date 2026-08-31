@@ -18,32 +18,41 @@ class MasterAgent(BaseAgent):
         raw_description = (state.get("raw_description") or "").strip()
         transcript = (state.get("transcript_text") or "").strip()
         
-        # Clean title for fallback
-        clean_raw_title = re.sub(r'#\w+', '', raw_title).strip()
-        if not clean_raw_title:
-            clean_raw_title = "Trending Viral Reel"
+        # Description-First Parsing: Filter out generic username titles
+        is_generic_title = not raw_title or raw_title.lower().startswith("video by") or raw_title.lower().startswith("reel by") or len(raw_title) < 5
+        
+        # Extract core topic from description
+        desc_clean = re.sub(r'#\w+', '', raw_description).strip()
+        desc_first_sentence = desc_clean.split('\n')[0].strip() if desc_clean else ""
+        
+        if is_generic_title and desc_first_sentence:
+            effective_topic = desc_first_sentence[:100]
+        else:
+            effective_topic = re.sub(r'#\w+', '', raw_title).strip() or desc_first_sentence[:100] or "Trending Video"
 
         system_prompt = (
-            "You are ReelGrab's Viral Intelligence Engine for YouTube Shorts and Instagram Reels.\n"
-            "Generate high-CTR, engaging metadata based on the video context.\n\n"
-            "Return JSON matching this schema:\n"
+            "You are ReelGrab's Elite YouTube Shorts Intelligence Engine powered by Qwen 2.5 7B.\n"
+            "Analyze the video caption and story details. Generate high-CTR viral titles that hook viewers instantly.\n"
+            "CRITICAL: Do NOT mention author usernames or 'Video by'. Focus on the actual movie, actors, dialogue, emotion, or story twist.\n\n"
+            "Return JSON matching:\n"
             "{\n"
-            '  "best_title": "High-CTR engaging viral title",\n'
-            '  "title_candidates": [{"title": "Title 1", "strategy": "Curiosity", "score": 95}, {"title": "Title 2", "strategy": "Emotional", "score": 90}],\n'
-            '  "viewer_appeal_score": 92,\n'
-            '  "title_reason": ["Strong curiosity gap and emotional hook"],\n'
-            '  "description": "Short engaging description with call to action. #Shorts #Viral",\n'
-            '  "youtube_hashtags": ["#Shorts", "#Viral", "#Trending", "#Reels", "#ShortsFeed"],\n'
-            '  "instagram_hashtags": ["#reels", "#viralreels", "#trending", "#explorepage", "#instareels"],\n'
-            '  "posting": {"scheduled_time": "19:30", "score": 95, "reason": "Peak evening mobile audience engagement window"},\n'
+            '  "best_title": "High-CTR viral title with emojis (under 60 chars)",\n'
+            '  "title_candidates": [{"title": "Curiosity Title", "strategy": "Curiosity", "score": 95}, {"title": "Emotional Title", "strategy": "Emotional", "score": 90}],\n'
+            '  "viewer_appeal_score": 95,\n'
+            '  "title_reason": ["Exploits curiosity gap and emotional bond"],\n'
+            '  "description": "Engaging description with call to action. #Shorts #Viral",\n'
+            '  "youtube_hashtags": ["#Shorts", "#Viral", "#Trending", "#ShortsFeed"],\n'
+            '  "instagram_hashtags": ["#reels", "#viralreels", "#explorepage"],\n'
+            '  "posting": {"scheduled_time": "19:30", "score": 95, "reason": "Optimal evening mobile retention slot"},\n'
             '  "validation": {"status": "passed"}\n'
             "}"
         )
         
-        context_text = f"TITLE: {clean_raw_title}\nDESCRIPTION: {raw_description[:400]}\nTRANSCRIPT: {transcript[:400]}"
-        user_prompt = f"Optimize this short video:\n{context_text}"
+        context_text = f"CONTENT SUMMARY / CAPTION:\n{desc_clean[:500]}\n\nRAW TITLE:\n{effective_topic}\n\nTRANSCRIPT / DIALOGUE:\n{transcript[:300]}"
+        user_prompt = f"Generate viral YouTube Shorts metadata for this video:\n{context_text}"
         
         parsed = call_ollama(
+            model="qwen2.5:7b",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.7,
@@ -51,33 +60,27 @@ class MasterAgent(BaseAgent):
         )
         
         if not parsed or not parsed.get("best_title"):
-            logger.info("Using smart instant viral metadata heuristics.")
-            # Intelligent instant fallback
-            fallback_title = f"The Truth Behind {clean_raw_title} 🤯" if len(clean_raw_title) < 40 else clean_raw_title
-            desc_clean = re.sub(r'#\w+', '', raw_description).strip() or clean_raw_title
-            
-            # Extract any existing hashtags
+            logger.info("Using smart description-first viral heuristics.")
+            fallback_title = f"{effective_topic} 🔥" if len(effective_topic) < 55 else f"The Iconic Moment in {effective_topic[:45]}..."
             existing_tags = re.findall(r'#\w+', raw_description)
-            default_tags = ["#Shorts", "#Viral", "#Trending", "#Reel", "#ShortsFeed", "#Explore"]
+            default_tags = ["#Shorts", "#Viral", "#Trending", "#ShortsFeed", "#Reels", "#Explore"]
             all_tags = list(dict.fromkeys(existing_tags + default_tags))[:10]
 
             parsed = {
                 "best_title": fallback_title,
                 "title_candidates": [
-                    {"title": fallback_title, "strategy": "Curiosity Gap", "score": 94},
-                    {"title": f"Why Everyone Is Talking About {clean_raw_title}", "strategy": "Social Proof", "score": 91},
-                    {"title": clean_raw_title, "strategy": "Direct", "score": 88}
+                    {"title": fallback_title, "strategy": "Curiosity", "score": 94},
+                    {"title": f"Why This Scene in {effective_topic[:40]} Hits Different", "strategy": "Emotional", "score": 91}
                 ],
                 "viewer_appeal_score": 92,
-                "title_reason": ["High curiosity hook with trending hashtag alignment"],
-                "description": f"{desc_clean}\n\n👉 Subscribe & follow for more trending content!\n{' '.join(all_tags[:6])}",
-                "youtube_hashtags": all_tags[:8],
-                "instagram_hashtags": all_tags[:15],
+                "title_reason": ["Extracted directly from caption and core story context"],
+                "description": f"{desc_clean[:300]}\n\n👉 Subscribe for more legendary scenes!\n{' '.join(all_tags[:5])}",
+                "youtube_hashtags": all_tags[:6],
+                "instagram_hashtags": all_tags[:12],
                 "posting": {
                     "scheduled_time": "19:30",
                     "score": 95,
-                    "confidence": "high",
-                    "reason": "Deterministic peak 7:30 PM audience window for maximum initial retention."
+                    "reason": "Standard peak evening audience slot."
                 },
                 "validation": {"status": "passed"}
             }

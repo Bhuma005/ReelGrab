@@ -6,27 +6,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 def get_optimal_model() -> str:
-    """Select the fastest high-quality local model to avoid 5-minute CPU stalls."""
-    try:
-        req = urllib.request.Request("http://127.0.0.1:11434/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=1.5) as res:
-            data = json.loads(res.read())
-            models = [m.get("name", "") for m in data.get("models", [])]
-            for pref in ["qwen2:0.5b", "qwen2.5:3b", "llama3.2:3b", "qwen2.5:7b"]:
-                if pref in models:
-                    return pref
-            if models:
-                return models[0]
-    except Exception as e:
-        logger.debug(f"Could not query Ollama tags: {e}")
-    return "qwen2:0.5b"
+    """Return user's chosen high-intelligence model."""
+    return "qwen2.5:7b"
 
 def call_ollama(model: str = None, system_prompt: str = "", user_prompt: str = "", temperature: float = 0.7, max_retries: int = 1) -> dict:
-    """Call Ollama with lean token budget and strict 14s timeout for instant UX."""
+    """Call Qwen 2.5 7B with lean 140-token budget for fast high-quality CPU inference."""
     if not model:
-        model = get_optimal_model()
+        model = "qwen2.5:7b"
 
-    timeout = 14.0
+    timeout = 60.0
 
     payload = {
         "model": model,
@@ -36,7 +24,8 @@ def call_ollama(model: str = None, system_prompt: str = "", user_prompt: str = "
         "stream": False,
         "options": {
             "temperature": temperature,
-            "num_predict": 220,
+            "num_predict": 140,
+            "num_thread": 8,
         }
     }
 

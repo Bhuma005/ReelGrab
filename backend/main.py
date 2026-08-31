@@ -506,17 +506,21 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         try:
             final_state = await asyncio.wait_for(
                 asyncio.to_thread(agent.run, initial_state),
-                timeout=18.0
+                timeout=65.0
             )
         except Exception as e:
             logger.warning(f"AI job {job_id} fast fallback due to: {e}")
+            desc_clean = re.sub(r'#\w+', '', description or '').strip()
+            first_line = desc_clean.split('\n')[0].strip() if desc_clean else ''
+            topic = first_line[:55] if (not title or title.lower().startswith('video by') or title.lower().startswith('reel by')) else title
+            fallback_title = f"{topic} 🔥" if topic else "Trending Viral Short"
             final_state = AgentState({
                 "metadata": {
                     "status": "success",
-                    "best_title": f"The Truth Behind {title or 'This Reel'} 🤯",
-                    "title_candidates": [{"title": f"The Truth Behind {title or 'This Reel'} 🤯", "strategy": "Curiosity", "score": 92}],
+                    "best_title": fallback_title,
+                    "title_candidates": [{"title": fallback_title, "strategy": "Curiosity", "score": 92}],
                     "viewer_appeal_score": 90,
-                    "title_reason": ["High curiosity gap and immediate audience engagement hook"],
+                    "title_reason": ["Extracted from caption context"],
                     "description": f"{description or 'Watch this trending video!'}\n\n#Shorts #Viral #Trending",
                     "youtube_hashtags": ["#Shorts", "#Viral", "#Trending", "#ShortsFeed"],
                     "instagram_hashtags": ["#reels", "#viralreels", "#explorepage"],
