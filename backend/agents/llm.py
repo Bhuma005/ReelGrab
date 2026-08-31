@@ -24,7 +24,7 @@ def call_ollama(model: str = None, system_prompt: str = "", user_prompt: str = "
         "stream": False,
         "options": {
             "temperature": temperature,
-            "num_predict": 140,
+            "num_predict": 220,
             "num_thread": 8,
         }
     }
