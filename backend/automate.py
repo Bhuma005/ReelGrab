@@ -149,7 +149,9 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
             title=opt_title,
             description=opt_desc,
             hashtags=opt_tags,
-            schedule_time=final_iso_schedule
+            schedule_time=final_iso_schedule,
+            source_url=req.url,
+            thumbnail_url=req.thumbnail_url
         )
         logger.info(f"✅ Video enqueued in cloud with DB ID: {new_id}")
     except Exception as e:

@@ -128,14 +128,15 @@ export default function LibraryPage() {
         </div>
       ) : (
         <>
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
             {videos.map(video => {
               const statusDisplay = getStatusDisplay(video);
               const canPublish = video.storage_exists && video.status !== 'published' && video.status !== 'cleaned' && video.status !== 'uploading';
               
               return (
-                <Card key={video.id} className="overflow-hidden group flex flex-col border-border/70 hover:border-accent/40 transition-colors">
-                  <div className="aspect-[9/16] bg-surface-elevated relative overflow-hidden">
+                <Card key={video.id} className="overflow-hidden group flex flex-col bg-surface border-border hover:border-accent/40 transition-all shadow-md">
+                  {/* YouTube Studio Thumbnail / Media Section */}
+                  <div className="aspect-video bg-surface-elevated relative overflow-hidden flex items-center justify-center border-b border-border">
                     {video.public_url ? (
                       <video 
                         src={video.public_url} 
@@ -145,48 +146,105 @@ export default function LibraryPage() {
                         onMouseEnter={e => e.target.play()} 
                         onMouseLeave={e => e.target.pause()} 
                       />
+                    ) : video.thumbnail_url ? (
+                      <img 
+                        src={video.thumbnail_url} 
+                        alt={video.title} 
+                        className="w-full h-full object-cover" 
+                      />
                     ) : (
-                      <div className="flex flex-col items-center justify-center h-full text-text-muted text-xs p-4 text-center bg-black/40">
-                        <CloudOff className="w-10 h-10 opacity-30 mb-2" />
+                      <div className="flex flex-col items-center justify-center h-full text-text-muted text-xs p-4 text-center bg-black/60 w-full">
+                        <Film className="w-8 h-8 opacity-30 mb-2 text-accent" />
                         <span className="font-semibold text-text-muted">
-                          {video.status === 'cleaned' ? '☁ Cloud file cleaned' : 'No local media'}
+                          {video.status === 'cleaned' ? '☁ Cloud file cleaned' : 'YouTube Shorts Media'}
                         </span>
-                        <span className="text-[10px] text-text-muted/60 mt-1">Metadata preserved</span>
+                        <span className="text-[10px] text-text-muted/60 mt-0.5">Metadata & logs preserved</span>
                       </div>
                     )}
 
-                    <div className="absolute top-2 right-2 flex gap-1.5 z-10">
-                      <span className={`text-[10px] uppercase px-2 py-0.5 rounded font-bold backdrop-blur-md border flex items-center shadow-sm ${statusDisplay.color}`}>
+                    {/* Status Badge */}
+                    <div className="absolute top-2.5 right-2.5 flex gap-1.5 z-10">
+                      <span className={`text-[10px] uppercase px-2 py-0.5 rounded font-bold backdrop-blur-md border flex items-center shadow-md ${statusDisplay.color}`}>
                         {statusDisplay.icon} {statusDisplay.text}
                       </span>
                     </div>
 
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/30 to-transparent pointer-events-none" />
+                    {/* Shorts indicator badge */}
+                    <div className="absolute bottom-2 left-2.5 z-10">
+                      <span className="text-[10px] font-mono font-bold bg-black/80 text-accent px-1.5 py-0.5 rounded border border-white/10">
+                        9:16 Shorts
+                      </span>
+                    </div>
+                  </div>
 
-                    <div className="absolute bottom-0 left-0 right-0 p-3.5 z-10">
-                      <h4 className="text-xs font-bold text-white line-clamp-2 leading-snug mb-1">{video.title}</h4>
-                      <p className="text-[10px] text-white/60 font-mono">
-                        {video.created_at ? format(new Date(video.created_at), 'MMM d, yyyy • h:mm a') : 'Unknown Date'}
-                      </p>
-                      
-                      {video.youtube_url && (
-                        <a 
-                          href={video.youtube_url} 
-                          target="_blank" 
-                          rel="noreferrer" 
-                          className="text-[10px] text-accent hover:underline mt-1.5 inline-flex items-center gap-1 font-semibold"
-                        >
-                          <ExternalLink className="w-3 h-3" /> Watch on YouTube
-                        </a>
+                  {/* YouTube Studio Card Details */}
+                  <div className="p-4 flex-1 flex flex-col space-y-3">
+                    <div>
+                      <h4 className="text-sm font-bold text-foreground line-clamp-2 leading-snug hover:text-accent transition-colors" title={video.title}>
+                        {video.title}
+                      </h4>
+                      {video.description && (
+                        <p className="text-xs text-text-muted line-clamp-2 mt-1.5 leading-relaxed font-sans">
+                          {video.description}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Hashtags Chips */}
+                    {video.hashtags && Array.isArray(video.hashtags) && video.hashtags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {video.hashtags.slice(0, 4).map((tag, idx) => (
+                          <span key={idx} className="text-[10px] font-mono text-accent/90 bg-accent/10 px-1.5 py-0.5 rounded border border-accent/20">
+                            {tag.startsWith('#') ? tag : `#${tag}`}
+                          </span>
+                        ))}
+                        {video.hashtags.length > 4 && (
+                          <span className="text-[10px] font-mono text-text-muted px-1 py-0.5">
+                            +{video.hashtags.length - 4} more
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Scheduled / Published Time Details (YT Studio style) */}
+                    <div className="pt-2 mt-auto border-t border-border/60 flex flex-col gap-1 text-[11px] text-text-muted font-mono">
+                      {video.schedule_time && (
+                        <div className="flex items-center gap-1.5 text-warning/90">
+                          <span>🕒 Scheduled:</span>
+                          <strong className="text-foreground">
+                            {format(new Date(video.schedule_time), 'MMM d, yyyy • h:mm a')}
+                          </strong>
+                        </div>
+                      )}
+
+                      {video.youtube_url ? (
+                        <div className="flex items-center justify-between mt-1">
+                          <span className="text-success font-semibold flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Live on YouTube
+                          </span>
+                          <a 
+                            href={video.youtube_url} 
+                            target="_blank" 
+                            rel="noreferrer" 
+                            className="text-accent hover:underline inline-flex items-center gap-1 font-bold"
+                          >
+                            <ExternalLink className="w-3 h-3" /> View Video
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-text-muted/70">
+                          Added: {video.created_at ? format(new Date(video.created_at), 'MMM d, yyyy • h:mm a') : 'Recently'}
+                        </div>
                       )}
                     </div>
                   </div>
 
-                  <div className="p-2.5 grid grid-cols-2 gap-2 border-t border-border bg-surface/50 mt-auto">
+                  {/* Action Toolbar */}
+                  <div className="p-2.5 grid grid-cols-2 gap-2 border-t border-border bg-surface-elevated/40">
                     <Button 
                       variant="secondary" 
                       size="sm" 
-                      className="text-xs h-7 w-full font-medium" 
+                      className="text-xs h-7.5 w-full font-semibold bg-accent/15 hover:bg-accent text-accent hover:text-black transition-colors" 
                       disabled={!canPublish || publishMutation.isPending}
                       onClick={() => publishMutation.mutate(video.id)}
                     >
@@ -195,12 +253,12 @@ export default function LibraryPage() {
                       ) : (
                         <Upload className="w-3 h-3 mr-1" />
                       )}
-                      Publish
+                      Publish Now
                     </Button>
                     <Button 
                       variant="ghost" 
                       size="sm" 
-                      className="text-xs h-7 w-full text-danger hover:bg-danger/10" 
+                      className="text-xs h-7.5 w-full text-danger hover:bg-danger/10" 
                       onClick={() => {
                         if(confirm("Delete this video permanently from library?")) deleteMutation.mutate(video.id);
                       }} 

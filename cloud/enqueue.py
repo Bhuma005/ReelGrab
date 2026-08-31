@@ -60,6 +60,8 @@ def enqueue_video(
     description: str,
     hashtags: list[str],
     schedule_time: str,
+    source_url: str = None,
+    thumbnail_url: str = None,
 ) -> str:
     """
     Creates permanent Library record, uploads file to Supabase Storage, 
@@ -88,7 +90,9 @@ def enqueue_video(
         "hashtags": hashtags,
         "schedule_time": schedule_utc,
         "status": "scheduled",
-        "storage_path": storage_path
+        "storage_path": storage_path,
+        "source_url": source_url,
+        "thumbnail_url": thumbnail_url
     }
     lib_res = sb.table("video_library").insert(lib_row).execute()
     library_id = lib_res.data[0]["id"]
