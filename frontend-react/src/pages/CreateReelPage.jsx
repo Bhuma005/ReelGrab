@@ -17,13 +17,19 @@ export default function CreateReelPage() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [isAutomating, setIsAutomating] = React.useState(false);
   const [automationResult, setAutomationResult] = React.useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = React.useState(0);
 
   const pollTimerRef = React.useRef(null);
+  const stopwatchRef = React.useRef(null);
 
   const stopPolling = () => {
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
+    }
+    if (stopwatchRef.current) {
+      clearInterval(stopwatchRef.current);
+      stopwatchRef.current = null;
     }
   };
 
@@ -33,8 +39,11 @@ export default function CreateReelPage() {
 
   const startAiAnalysis = async (title, description, videoUrl) => {
     stopPolling();
+    setElapsedSeconds(0);
+    stopwatchRef.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
+
     store.setAiAnalysisStatus('loading');
-    store.setAiJobProgress(null, 10, 'Queued for processing...');
+    store.setAiJobProgress(null, 15, 'Queued for background analysis...');
 
     try {
       const initRes = await metadataApi.analyze(title, description, videoUrl);
@@ -480,89 +489,123 @@ export default function CreateReelPage() {
                       </div>
                     </>
                   ) : store.aiAnalysisStatus === 'loading' ? (
-                    <div className="space-y-5 p-2">
+                    <div className="space-y-4 p-3 bg-surface-elevated/40 rounded-lg border border-border">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 text-accent font-semibold text-xs tracking-wider uppercase">
                           <Sparkles className="w-4 h-4 animate-spin text-accent" />
-                          <span>AI Processing In Background</span>
+                          <span>AI Content Optimization</span>
                         </div>
-                        <span className="text-xs font-mono font-bold bg-accent/10 text-accent px-2 py-0.5 rounded border border-accent/20">
-                          {store.aiProgress}%
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-mono text-text-muted bg-background/80 px-2 py-0.5 rounded border border-border">
+                            ⏱ Elapsed: {elapsedSeconds}s
+                          </span>
+                          <span className="text-xs font-mono font-bold bg-accent/15 text-accent px-2 py-0.5 rounded border border-accent/30">
+                            {store.aiProgress}%
+                          </span>
+                        </div>
                       </div>
 
                       {/* Progress Bar */}
-                      <div className="w-full bg-surface-elevated h-2 rounded-full overflow-hidden border border-border">
+                      <div className="w-full bg-surface h-2 rounded-full overflow-hidden border border-border/80">
                         <div 
-                          className="bg-gradient-to-r from-accent to-[#C88A3B] h-full transition-all duration-500 rounded-full"
+                          className="bg-gradient-to-r from-accent via-[#e5a955] to-accent h-full transition-all duration-500 rounded-full"
                           style={{ width: `${Math.max(store.aiProgress, 8)}%` }}
                         />
                       </div>
 
-                      {/* Step By Step Tracker */}
-                      <div className="space-y-2.5 text-xs font-mono">
+                      {/* 5-Step Staged Interface */}
+                      <div className="space-y-2 text-xs font-mono">
                         <div className="flex items-center gap-2.5">
-                          {store.aiProgress >= 25 ? (
+                          {store.aiProgress >= 20 ? (
                             <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
                           ) : (
-                            <div className="w-4 h-4 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">1</div>
+                            <RefreshCw className="w-3.5 h-3.5 text-accent animate-spin flex-shrink-0" />
                           )}
-                          <span className={store.aiProgress >= 25 ? "text-foreground font-medium" : "text-text-muted"}>
-                            Extract transcript & audio cues
+                          <span className={store.aiProgress >= 20 ? "text-foreground font-medium" : "text-text-muted"}>
+                            Video received & stream verified
                           </span>
                         </div>
 
                         <div className="flex items-center gap-2.5">
-                          {store.aiProgress >= 50 ? (
+                          {store.aiProgress >= 40 ? (
                             <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                          ) : store.aiProgress >= 20 ? (
+                            <RefreshCw className="w-3.5 h-3.5 text-accent animate-spin flex-shrink-0" />
                           ) : (
-                            <div className="w-4 h-4 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">2</div>
+                            <div className="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">○</div>
                           )}
-                          <span className={store.aiProgress >= 50 ? "text-foreground font-medium" : "text-text-muted"}>
-                            Analyze viral hooks & audience retention
+                          <span className={store.aiProgress >= 40 ? "text-foreground font-medium" : "text-text-muted"}>
+                            Transcript extracted & audio analyzed
                           </span>
                         </div>
 
                         <div className="flex items-center gap-2.5">
-                          {store.aiProgress >= 75 ? (
+                          {store.aiProgress >= 60 ? (
                             <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                          ) : store.aiProgress >= 40 ? (
+                            <RefreshCw className="w-3.5 h-3.5 text-accent animate-spin flex-shrink-0" />
                           ) : (
-                            <div className="w-4 h-4 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">3</div>
+                            <div className="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">○</div>
                           )}
-                          <span className={store.aiProgress >= 75 ? "text-foreground font-medium" : "text-text-muted"}>
-                            Generate high-CTR titles & viral tags
+                          <span className={store.aiProgress >= 60 ? "text-foreground font-medium" : "text-text-muted"}>
+                            Finding strongest viral hooks & emotional retention
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          {store.aiProgress >= 80 ? (
+                            <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                          ) : store.aiProgress >= 60 ? (
+                            <RefreshCw className="w-3.5 h-3.5 text-accent animate-spin flex-shrink-0" />
+                          ) : (
+                            <div className="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">○</div>
+                          )}
+                          <span className={store.aiProgress >= 80 ? "text-foreground font-medium" : "text-text-muted"}>
+                            Generating high-CTR titles & viral descriptions
                           </span>
                         </div>
 
                         <div className="flex items-center gap-2.5">
                           {store.aiProgress >= 100 ? (
                             <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                          ) : store.aiProgress >= 80 ? (
+                            <RefreshCw className="w-3.5 h-3.5 text-accent animate-spin flex-shrink-0" />
                           ) : (
-                            <div className="w-4 h-4 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">4</div>
+                            <div className="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">○</div>
                           )}
                           <span className={store.aiProgress >= 100 ? "text-foreground font-medium" : "text-text-muted"}>
-                            Calculate optimal posting window
+                            Optimizing hashtag bundles & schedule window
                           </span>
                         </div>
                       </div>
 
-                      {/* Current message and Cancel button */}
+                      {/* Current message and Action buttons */}
                       <div className="pt-3 border-t border-border flex items-center justify-between gap-2">
-                        <p className="text-[11px] text-text-muted truncate">
+                        <p className="text-[11px] text-text-muted truncate font-mono">
                           {store.aiStepMessage || "Processing with local LLM..."}
                         </p>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-7 text-xs text-danger hover:bg-danger/10 flex items-center gap-1 flex-shrink-0"
-                          onClick={handleCancelAi}
-                        >
-                          <XCircle className="w-3.5 h-3.5" /> Cancel
-                        </Button>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-7 text-xs text-danger hover:bg-danger/10 flex items-center gap-1"
+                            onClick={handleCancelAi}
+                          >
+                            <XCircle className="w-3.5 h-3.5" /> Cancel
+                          </Button>
+                          <Button 
+                            variant="secondary" 
+                            size="sm" 
+                            className="h-7 text-xs bg-accent text-black hover:bg-accent/90"
+                            onClick={handleContinueWithoutAi}
+                          >
+                            Skip AI
+                          </Button>
+                        </div>
                       </div>
 
-                      <div className="bg-background p-2.5 rounded border border-border/60 text-[11px] text-text-muted">
-                        💡 <strong>Non-blocking:</strong> You can download formats or configure settings below while AI runs.
+                      <div className="bg-background/80 p-2.5 rounded border border-border/60 text-[11px] text-text-muted">
+                        💡 <strong>Non-blocking:</strong> You can download formats or configure schedule settings below while AI runs in background.
                       </div>
                     </div>
                   ) : store.aiAnalysisStatus === 'cancelled' ? (

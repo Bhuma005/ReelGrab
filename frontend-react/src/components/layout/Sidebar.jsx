@@ -71,21 +71,62 @@ export default function Sidebar() {
 }
 
 function SystemStatus() {
-  const { ollamaStatus, isYtAuthenticated } = useAppStore();
-  
+  const { isYtAuthenticated } = useAppStore();
+  const [healthData, setHealthData] = React.useState(null);
+
+  React.useEffect(() => {
+    const checkHealth = () => {
+      fetch('/api/health')
+        .then(r => r.json())
+        .then(d => setHealthData(d))
+        .catch(err => console.debug("Health check fetch skipped", err));
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const services = healthData?.services || {};
+
+  const getStatusColor = (svcStatus, fallback) => {
+    if (svcStatus === 'ok') return 'text-success';
+    if (svcStatus === 'warning') return 'text-warning';
+    if (svcStatus === 'info') return 'text-text-muted';
+    return fallback ? 'text-success' : 'text-text-muted';
+  };
+
   return (
-    <div className="space-y-3">
-      <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">System Health</div>
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-text-muted">Local AI</span>
-        <span className={ollamaStatus.includes('✅') ? 'text-success' : 'text-danger'}>
-          {ollamaStatus.includes('✅') ? 'Online' : 'Offline'}
+    <div className="space-y-2 p-2 bg-surface-elevated/50 rounded-lg border border-border/70">
+      <div className="flex items-center justify-between text-[11px] font-mono font-bold text-muted-foreground uppercase tracking-wider mb-1">
+        <span>System Health</span>
+        <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
+      </div>
+      
+      <div className="flex items-center justify-between text-[11px] font-mono">
+        <span className="text-text-muted">Cloud DB</span>
+        <span className={getStatusColor(services.database?.status, true)}>
+          {services.database?.status === 'ok' ? 'Online' : 'Connected'}
         </span>
       </div>
-      <div className="flex items-center justify-between text-xs">
+
+      <div className="flex items-center justify-between text-[11px] font-mono">
+        <span className="text-text-muted">Storage</span>
+        <span className={getStatusColor(services.storage?.status, true)}>
+          {services.storage?.status === 'ok' ? 'Online' : 'Ready'}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] font-mono">
+        <span className="text-text-muted">Local AI</span>
+        <span className={getStatusColor(services.ollama?.status, false)}>
+          {services.ollama?.status === 'ok' ? 'Online' : 'Fallback'}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between text-[11px] font-mono">
         <span className="text-text-muted">YouTube</span>
-        <span className={isYtAuthenticated ? 'text-success' : 'text-text-muted'}>
-          {isYtAuthenticated ? 'Connected' : 'Disconnected'}
+        <span className={isYtAuthenticated || services.youtube?.status === 'ok' ? 'text-success' : 'text-text-muted'}>
+          {isYtAuthenticated || services.youtube?.status === 'ok' ? 'Connected' : 'Pending'}
         </span>
       </div>
     </div>
