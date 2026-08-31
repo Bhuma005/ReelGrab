@@ -440,6 +440,58 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         job["progress"] = 75
         job["current_step"] = "Generating viral titles, descriptions & hashtag bundles..."
         
+        # Pre-flight check: is Ollama alive?
+        ollama_alive = False
+        try:
+            import urllib.request
+            req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                if resp.status == 200:
+                    ollama_alive = True
+        except Exception:
+            ollama_alive = False
+            
+        if not ollama_alive:
+            logger.warning(f"Ollama server not reachable for job {job_id}. Using deterministic fallback metadata.")
+            fallback_title = title or "Trending Reel"
+            fallback_desc = description or "Watch this trending video! #Shorts #Viral"
+            fallback_tags = ["#Shorts", "#Viral", "#Trending", "#Reel"]
+            
+            raw_result = {
+                "title": fallback_title,
+                "description": fallback_desc,
+                "youtube_hashtags": fallback_tags,
+                "instagram_hashtags": fallback_tags,
+                "title_candidates": [{"strategy": "Original", "title": fallback_title}],
+                "viewer_appeal_score": 75,
+                "title_reason": ["Deterministic fallback (Ollama unavailable)"],
+                "posting_recommendation": {
+                    "human_readable_time": "07:30 PM",
+                    "reason": "Standard peak evening engagement slot."
+                },
+                "ai_failed": True,
+                "fallback": True
+            }
+            
+            result_payload = {
+                "viral_title": fallback_title,
+                "optimized_description": fallback_desc,
+                "youtube": fallback_tags,
+                "instagram": fallback_tags,
+                "analysis": "Generated using deterministic fallback (Ollama model server is offline).",
+                "confidence_notes": "FALLBACK",
+                "scheduled_time": "07:30 PM",
+                "raw_result": raw_result,
+                "ai_failed": True
+            }
+            
+            job["status"] = "COMPLETED"
+            job["progress"] = 100
+            job["current_step"] = "AI completed with fallback metadata"
+            job["completed_at"] = datetime.now().isoformat()
+            job["result"] = result_payload
+            return
+
         from backend.agents.orchestrator import OrchestratorAgent
         from backend.agents.master_agent import MasterAgent
 
@@ -651,6 +703,9 @@ async def get_dashboard_videos(
     search: Optional[str] = None
 ):
     from cloud.cloud_auth import get_supabase_client
+    # Enforce safe parameter bounds
+    page = max(1, page)
+    limit = max(1, min(limit, 100))
     try:
         sb = get_supabase_client()
         query = sb.table("video_library").select("*", count="exact")
@@ -1012,4 +1067,26 @@ async def health_check():
         health["services"]["youtube"] = {"status": "info", "message": "YouTube account not linked yet"}
 
     return health
+
+
+@app.get("/api/health/ai", summary="AI Health Check")
+async def health_check_ai():
+    import urllib.request
+    try:
+        req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            if resp.status == 200:
+                return {
+                    "available": True,
+                    "provider": "ollama",
+                    "model": "qwen2.5:7b",
+                    "endpoint": "http://localhost:11434"
+                }
+    except Exception as e:
+        return {
+            "available": False,
+            "provider": "ollama",
+            "error": "Ollama server not responding on port 11434",
+            "fallback_enabled": True
+        }
 

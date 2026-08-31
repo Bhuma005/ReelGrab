@@ -11,12 +11,21 @@ export default function LibraryPage() {
   const queryClient = useQueryClient();
   const [activeStatus, setActiveStatus] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const limit = 12;
 
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
   const { data: videosData, isLoading } = useQuery({
-    queryKey: ['dashboardVideos', page, activeStatus, searchTerm],
-    queryFn: () => dashboardApi.getVideos({ page, limit, status: activeStatus, search: searchTerm }),
+    queryKey: ['dashboardVideos', page, activeStatus, debouncedSearch],
+    queryFn: () => dashboardApi.getVideos({ page, limit, status: activeStatus, search: debouncedSearch }),
     refetchInterval: 8000
   });
 

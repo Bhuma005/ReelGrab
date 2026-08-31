@@ -120,6 +120,37 @@ export default function CreateReelPage() {
     }
   };
 
+  const handleContinueWithoutAi = () => {
+    stopPolling();
+    const fallbackTitle = store.metadata?.title || 'Trending Reel';
+    const fallbackDesc = store.metadata?.description || '';
+    const fallbackTags = store.allHashtags && store.allHashtags.length > 0 ? store.allHashtags : ['#Shorts', '#Viral', '#Trending'];
+    
+    store.setAiAnalysisResult({
+      viral_title: fallbackTitle,
+      optimized_description: fallbackDesc,
+      youtube: fallbackTags,
+      instagram: fallbackTags,
+      analysis: "Using original video metadata (bypassed AI model).",
+      confidence_notes: "MANUAL",
+      scheduled_time: "07:30 PM",
+      raw_result: {
+        title: fallbackTitle,
+        description: fallbackDesc,
+        youtube_hashtags: fallbackTags,
+        instagram_hashtags: fallbackTags,
+        title_candidates: [{ strategy: 'Original Source', title: fallbackTitle }],
+        viewer_appeal_score: 75,
+        title_reason: ['Original Source Metadata'],
+        posting_recommendation: {
+          human_readable_time: "07:30 PM",
+          reason: "Standard evening posting slot."
+        }
+      }
+    });
+    toast.info("Proceeding with standard metadata");
+  };
+
   const handleFetch = async () => {
     if (!store.url.trim()) return;
     
@@ -540,10 +571,15 @@ export default function CreateReelPage() {
                         <XCircle className="w-5 h-5" />
                       </div>
                       <h3 className="font-bold text-sm">AI Analysis Cancelled</h3>
-                      <p className="text-xs text-text-muted max-w-[280px]">You stopped the background AI worker. You can still download the video or retry AI.</p>
-                      <Button variant="outline" size="sm" onClick={handleRetryAi} className="text-xs">
-                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Restart AI Analysis
-                      </Button>
+                      <p className="text-xs text-text-muted max-w-[280px]">You stopped the background AI worker. You can restart AI or proceed with standard video metadata.</p>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={handleRetryAi} className="text-xs">
+                          <RotateCcw className="w-3.5 h-3.5 mr-1" /> Restart AI
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={handleContinueWithoutAi} className="text-xs bg-accent text-black hover:bg-accent/90">
+                          Continue Without AI
+                        </Button>
+                      </div>
                     </div>
                   ) : store.aiAnalysisStatus === 'timeout' ? (
                     <div className="py-8 flex flex-col items-center justify-center text-center space-y-3">
@@ -552,9 +588,14 @@ export default function CreateReelPage() {
                       </div>
                       <h3 className="font-bold text-sm">AI Optimization Timed Out</h3>
                       <p className="text-xs text-text-muted max-w-[280px]">{store.aiAnalysisError || "The AI took too long to respond. You can retry or proceed using existing video details."}</p>
-                      <Button variant="outline" size="sm" onClick={handleRetryAi} className="text-xs">
-                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Try Again
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={handleRetryAi} className="text-xs">
+                          <RotateCcw className="w-3.5 h-3.5 mr-1" /> Try Again
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={handleContinueWithoutAi} className="text-xs bg-accent text-black hover:bg-accent/90">
+                          Continue Without AI
+                        </Button>
+                      </div>
                     </div>
                   ) : store.aiAnalysisStatus === 'error' ? (
                     <div className="py-8 flex flex-col items-center justify-center text-center space-y-3">
@@ -563,9 +604,14 @@ export default function CreateReelPage() {
                       </div>
                       <h3 className="font-bold text-sm">AI Optimization Failed</h3>
                       <p className="text-xs text-text-muted max-w-[280px]">{store.aiAnalysisError || "An error occurred while generating metadata."}</p>
-                      <Button variant="outline" size="sm" onClick={handleRetryAi} className="text-xs">
-                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Retry AI Analysis
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={handleRetryAi} className="text-xs">
+                          <RotateCcw className="w-3.5 h-3.5 mr-1" /> Retry AI
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={handleContinueWithoutAi} className="text-xs bg-accent text-black hover:bg-accent/90">
+                          Continue Without AI
+                        </Button>
+                      </div>
                     </div>
                   ) : null}
                 </CardContent>
