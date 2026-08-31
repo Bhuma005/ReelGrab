@@ -3,7 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { dashboardApi } from '../api/dashboard';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Trash2, Film, RefreshCw, Upload, CheckCircle2, AlertTriangle, CloudOff, Search, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
+import { 
+  Trash2, Film, RefreshCw, Upload, CheckCircle2, AlertTriangle, CloudOff, 
+  Search, ChevronLeft, ChevronRight, ExternalLink, Play, X, Copy, Check, Calendar, Hash, Clock, Sparkles 
+} from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -13,6 +16,8 @@ export default function LibraryPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [copied, setCopied] = useState(false);
   const limit = 12;
 
   React.useEffect(() => {
@@ -33,6 +38,7 @@ export default function LibraryPage() {
     mutationFn: dashboardApi.deleteVideo,
     onSuccess: () => {
       toast.success("Video deleted");
+      if (selectedVideo) setSelectedVideo(null);
       queryClient.invalidateQueries(['dashboardVideos']);
     },
     onError: (err) => toast.error(err.message)
@@ -73,12 +79,20 @@ export default function LibraryPage() {
     return { text: v.status || 'Created', color: 'text-text-muted border-border bg-surface' };
   };
 
+  const handleCopyMetadata = (v) => {
+    const text = `${v.title}\n\n${v.description || ''}\n\n${(v.hashtags || []).join(' ')}`;
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    toast.success("Title, description & tags copied to clipboard!");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-20">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Content Library</h2>
-          <p className="text-xs text-text-muted">Permanent historical repository of all your Reels ({totalCount} total).</p>
+          <p className="text-xs text-text-muted">Click any video to open the YouTube Studio video preview and inspect details ({totalCount} total).</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -87,7 +101,7 @@ export default function LibraryPage() {
               type="text" 
               placeholder="Search title..." 
               value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="bg-surface-elevated border border-border rounded-md pl-9 pr-3 py-1.5 text-xs focus:outline-none focus:border-accent w-48 md:w-60 font-mono"
             />
           </div>
@@ -134,7 +148,11 @@ export default function LibraryPage() {
               const canPublish = video.storage_exists && video.status !== 'published' && video.status !== 'cleaned' && video.status !== 'uploading';
               
               return (
-                <Card key={video.id} className="overflow-hidden group flex flex-col bg-surface border-border hover:border-accent/40 transition-all shadow-md">
+                <Card 
+                  key={video.id} 
+                  className="overflow-hidden group flex flex-col bg-surface border-border hover:border-accent/50 transition-all shadow-md cursor-pointer hover:shadow-lg"
+                  onClick={() => setSelectedVideo(video)}
+                >
                   {/* YouTube Studio Thumbnail / Media Section */}
                   <div className="aspect-video bg-surface-elevated relative overflow-hidden flex items-center justify-center border-b border-border">
                     {video.public_url ? (
@@ -162,6 +180,16 @@ export default function LibraryPage() {
                       </div>
                     )}
 
+                    {/* Play Hover Overlay */}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pointer-events-none">
+                      <div className="w-10 h-10 rounded-full bg-accent text-black flex items-center justify-center shadow-lg transform group-hover:scale-105 transition-transform">
+                        <Play className="w-5 h-5 fill-current ml-0.5" />
+                      </div>
+                      <span className="text-xs font-bold text-white bg-black/70 px-2.5 py-1 rounded backdrop-blur-md">
+                        Preview Video
+                      </span>
+                    </div>
+
                     {/* Status Badge */}
                     <div className="absolute top-2.5 right-2.5 flex gap-1.5 z-10">
                       <span className={`text-[10px] uppercase px-2 py-0.5 rounded font-bold backdrop-blur-md border flex items-center shadow-md ${statusDisplay.color}`}>
@@ -180,7 +208,7 @@ export default function LibraryPage() {
                   {/* YouTube Studio Card Details */}
                   <div className="p-4 flex-1 flex flex-col space-y-3">
                     <div>
-                      <h4 className="text-sm font-bold text-foreground line-clamp-2 leading-snug hover:text-accent transition-colors" title={video.title}>
+                      <h4 className="text-sm font-bold text-foreground line-clamp-2 leading-snug group-hover:text-accent transition-colors" title={video.title}>
                         {video.title}
                       </h4>
                       {video.description && (
@@ -206,7 +234,7 @@ export default function LibraryPage() {
                       </div>
                     )}
 
-                    {/* Scheduled / Published Time Details (YT Studio style) */}
+                    {/* Scheduled / Published Time Details */}
                     <div className="pt-2 mt-auto border-t border-border/60 flex flex-col gap-1 text-[11px] text-text-muted font-mono">
                       {video.schedule_time && (
                         <div className="flex items-center gap-1.5 text-warning/90">
@@ -226,6 +254,7 @@ export default function LibraryPage() {
                             href={video.youtube_url} 
                             target="_blank" 
                             rel="noreferrer" 
+                            onClick={e => e.stopPropagation()}
                             className="text-accent hover:underline inline-flex items-center gap-1 font-bold"
                           >
                             <ExternalLink className="w-3 h-3" /> View Video
@@ -240,7 +269,7 @@ export default function LibraryPage() {
                   </div>
 
                   {/* Action Toolbar */}
-                  <div className="p-2.5 grid grid-cols-2 gap-2 border-t border-border bg-surface-elevated/40">
+                  <div className="p-2.5 grid grid-cols-2 gap-2 border-t border-border bg-surface-elevated/40" onClick={e => e.stopPropagation()}>
                     <Button 
                       variant="secondary" 
                       size="sm" 
@@ -302,7 +331,168 @@ export default function LibraryPage() {
           )}
         </>
       )}
+
+      {/* ── YouTube Studio Video Preview & Inspection Modal ── */}
+      {selectedVideo && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-surface border border-border rounded-xl w-full max-w-5xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Top Bar */}
+            <div className="px-5 py-3.5 bg-surface-elevated border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Film className="w-4 h-4 text-accent" />
+                <h3 className="font-bold text-sm text-foreground">YouTube Studio Video Preview & Details</h3>
+              </div>
+              <button 
+                onClick={() => setSelectedVideo(null)}
+                className="p-1 rounded-md text-text-muted hover:text-foreground hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body: 2 Columns */}
+            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 md:grid-cols-12 gap-6">
+              {/* Left Column: 9:16 Video Player Preview */}
+              <div className="md:col-span-5 flex flex-col items-center justify-center bg-black/60 rounded-lg p-4 border border-border">
+                <div className="w-full max-w-[280px] aspect-[9/16] bg-black rounded-lg overflow-hidden relative shadow-2xl border border-white/10 flex items-center justify-center">
+                  {selectedVideo.public_url ? (
+                    <video 
+                      src={selectedVideo.public_url} 
+                      className="w-full h-full object-cover" 
+                      controls 
+                      autoPlay 
+                      loop 
+                      playsInline
+                    />
+                  ) : selectedVideo.thumbnail_url ? (
+                    <img 
+                      src={selectedVideo.thumbnail_url} 
+                      alt={selectedVideo.title} 
+                      className="w-full h-full object-cover" 
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-center p-6 text-text-muted">
+                      <Film className="w-12 h-12 text-accent/50 mb-3" />
+                      <span className="font-bold text-sm text-foreground">Cloud Media Cleaned</span>
+                      <p className="text-xs text-text-muted mt-1">Video was published to YouTube and local storage was safely cleaned.</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-3 flex items-center justify-between w-full max-w-[280px] text-[11px] font-mono text-text-muted">
+                  <span>9:16 Vertical Short</span>
+                  <span className={`px-2 py-0.5 rounded font-bold uppercase ${getStatusDisplay(selectedVideo).color}`}>
+                    {getStatusDisplay(selectedVideo).text}
+                  </span>
+                </div>
+              </div>
+
+              {/* Right Column: YouTube Studio Title & Description Details */}
+              <div className="md:col-span-7 flex flex-col space-y-4">
+                {/* Title */}
+                <div>
+                  <label className="block text-xs font-bold text-text-muted uppercase tracking-wider mb-1">
+                    Video Title
+                  </label>
+                  <div className="p-3 bg-surface-elevated rounded-md border border-border text-sm font-semibold text-foreground select-text">
+                    {selectedVideo.title}
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-text-muted uppercase tracking-wider">
+                      YouTube Description
+                    </label>
+                    <button 
+                      onClick={() => handleCopyMetadata(selectedVideo)}
+                      className="text-xs text-accent hover:underline flex items-center gap-1 font-mono"
+                    >
+                      {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
+                      {copied ? 'Copied' : 'Copy All'}
+                    </button>
+                  </div>
+                  <div className="p-3 bg-surface-elevated rounded-md border border-border text-xs text-foreground/90 font-sans leading-relaxed min-h-[110px] whitespace-pre-wrap select-text">
+                    {selectedVideo.description || "No description provided."}
+                  </div>
+                </div>
+
+                {/* Hashtags */}
+                <div>
+                  <label className="block text-xs font-bold text-text-muted uppercase tracking-wider mb-1.5">
+                    Viral Hashtags
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 p-2.5 bg-surface-elevated rounded-md border border-border">
+                    {selectedVideo.hashtags && selectedVideo.hashtags.length > 0 ? (
+                      selectedVideo.hashtags.map((tag, idx) => (
+                        <span key={idx} className="text-xs font-mono font-semibold text-accent bg-accent/10 px-2 py-1 rounded border border-accent/30">
+                          {tag.startsWith('#') ? tag : `#${tag}`}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-text-muted">No hashtags attached</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Publishing / Scheduling Details */}
+                <div className="p-3 bg-surface-elevated rounded-md border border-border grid grid-cols-2 gap-3 text-xs font-mono">
+                  <div>
+                    <span className="text-text-muted block text-[10px] uppercase">Schedule Slot</span>
+                    <span className="font-bold text-warning flex items-center gap-1 mt-0.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      {selectedVideo.schedule_time ? format(new Date(selectedVideo.schedule_time), 'MMM d, yyyy • h:mm a') : 'Instant Upload'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-text-muted block text-[10px] uppercase">YouTube Status</span>
+                    {selectedVideo.youtube_url ? (
+                      <a 
+                        href={selectedVideo.youtube_url} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="font-bold text-accent hover:underline flex items-center gap-1 mt-0.5"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" /> Live on YouTube
+                      </a>
+                    ) : (
+                      <span className="text-text-muted mt-0.5 block">Pending Upload</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Modal Footer Controls */}
+                <div className="pt-3 border-t border-border flex items-center justify-end gap-3 mt-auto">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setSelectedVideo(null)}
+                  >
+                    Close
+                  </Button>
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    className="bg-accent text-black hover:bg-accent/90 font-bold text-xs"
+                    disabled={!selectedVideo.storage_exists || selectedVideo.status === 'published' || publishMutation.isPending}
+                    onClick={() => publishMutation.mutate(selectedVideo.id)}
+                  >
+                    {publishMutation.isPending ? (
+                      <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <Upload className="w-3.5 h-3.5 mr-1.5" />
+                    )}
+                    Publish to YouTube Now
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 
