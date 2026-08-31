@@ -55,26 +55,30 @@ function AppBootstrapper({ children }) {
   return children;
 }
 
+import { ErrorBoundary } from './components/ErrorBoundary';
+
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AppBootstrapper>
-          <Routes>
-            <Route path="/" element={<AppLayout />}>
-              <Route index element={<DashboardPage />} />
-              <Route path="create" element={<CreateReelPage />} />
-              <Route path="library" element={<LibraryPage />} />
-              <Route path="scheduler" element={<SchedulerPage />} />
-              <Route path="analytics" element={<AnalyticsPage />} />
-              <Route path="connections" element={<ConnectionsPage />} />
-              <Route path="logs" element={<LogsPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Routes>
-        </AppBootstrapper>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <AppBootstrapper>
+            <Routes>
+              <Route path="/" element={<AppLayout />}>
+                <Route index element={<DashboardPage />} />
+                <Route path="create" element={<CreateReelPage />} />
+                <Route path="library" element={<LibraryPage />} />
+                <Route path="scheduler" element={<SchedulerPage />} />
+                <Route path="analytics" element={<AnalyticsPage />} />
+                <Route path="connections" element={<ConnectionsPage />} />
+                <Route path="logs" element={<LogsPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Routes>
+          </AppBootstrapper>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
