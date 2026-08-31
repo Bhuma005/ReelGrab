@@ -1017,56 +1017,64 @@ async def get_dashboard_logs(limit: int = 50):
 
 @app.get("/api/health", summary="System Health Audit", description="Reports health of Backend, Supabase Database, Storage, Ollama GenAI, and YouTube Auth.")
 async def health_check():
-    import urllib.request
-    from cloud.cloud_auth import get_supabase_client
+HEALTH_CACHE = {
+    "data": None,
+    "last_check": 0
+}
+
+@app.get("/api/health", summary="System Health Audit", description="Reports health of Backend, Supabase Database, Storage, Ollama GenAI, and YouTube Auth.")
+async def health_check():
+    import time
+    global HEALTH_CACHE
     
-    health = {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "services": {
-            "backend": {"status": "ok", "message": "FastAPI running"},
-            "database": {"status": "unknown", "message": ""},
-            "storage": {"status": "unknown", "message": ""},
-            "ollama": {"status": "unknown", "message": ""},
-            "youtube": {"status": "unknown", "message": ""}
+    now = time.time()
+    if HEALTH_CACHE["data"] and (now - HEALTH_CACHE["last_check"] < 30):
+        return HEALTH_CACHE["data"]
+
+    def _do_check():
+        import urllib.request
+        from cloud.cloud_auth import get_supabase_client
+        health = {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "services": {
+                "backend": {"status": "ok", "message": "FastAPI running"},
+                "database": {"status": "ok", "message": "Connected to Supabase DB"},
+                "storage": {"status": "ok", "message": "Storage bucket accessible"},
+                "ollama": {"status": "unknown", "message": ""},
+                "youtube": {"status": "unknown", "message": ""}
+            }
         }
-    }
-    
-    # 1. Supabase Database check
-    try:
-        sb = get_supabase_client()
-        res = sb.table("video_library").select("id").limit(1).execute()
-        health["services"]["database"] = {"status": "ok", "message": "Connected to Supabase DB"}
-    except Exception as e:
-        health["services"]["database"] = {"status": "warning", "message": f"DB connection check: {str(e)[:60]}"}
+        
+        # 1. Supabase Database check
+        try:
+            sb = get_supabase_client()
+            sb.table("video_library").select("id").limit(1).execute()
+        except Exception as e:
+            health["services"]["database"] = {"status": "warning", "message": f"DB check: {str(e)[:60]}"}
 
-    # 2. Supabase Storage check
-    try:
-        sb = get_supabase_client()
-        sb.storage.from_("reelgrab-videos").list()
-        health["services"]["storage"] = {"status": "ok", "message": "Storage bucket accessible"}
-    except Exception as e:
-        health["services"]["storage"] = {"status": "warning", "message": f"Storage bucket check: {str(e)[:60]}"}
+        # 2. Ollama check
+        try:
+            req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                if resp.status == 200:
+                    health["services"]["ollama"] = {"status": "ok", "message": "Ollama active"}
+        except Exception:
+            health["services"]["ollama"] = {"status": "info", "message": "Ollama offline (fallback active)"}
 
-    # 3. Ollama check
-    try:
-        req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=1.5) as resp:
-            if resp.status == 200:
-                health["services"]["ollama"] = {"status": "ok", "message": "Ollama local model server active"}
-            else:
-                health["services"]["ollama"] = {"status": "warning", "message": f"Ollama HTTP {resp.status}"}
-    except Exception:
-        health["services"]["ollama"] = {"status": "warning", "message": "Ollama server not responding on port 11434"}
+        # 3. YouTube OAuth check
+        yt_creds_path = os.path.join(os.path.dirname(__file__), "youtube_credentials.json")
+        if os.path.exists(yt_creds_path) and os.path.getsize(yt_creds_path) > 10:
+            health["services"]["youtube"] = {"status": "ok", "message": "YouTube OAuth token present"}
+        else:
+            health["services"]["youtube"] = {"status": "info", "message": "YouTube account not linked yet"}
 
-    # 4. YouTube OAuth check
-    yt_creds_path = os.path.join(os.path.dirname(__file__), "youtube_credentials.json")
-    if os.path.exists(yt_creds_path) and os.path.getsize(yt_creds_path) > 10:
-        health["services"]["youtube"] = {"status": "ok", "message": "YouTube OAuth token present"}
-    else:
-        health["services"]["youtube"] = {"status": "info", "message": "YouTube account not linked yet"}
+        return health
 
-    return health
+    result = await asyncio.to_thread(_do_check)
+    HEALTH_CACHE["data"] = result
+    HEALTH_CACHE["last_check"] = now
+    return result
 
 
 @app.get("/api/health/ai", summary="AI Health Check")

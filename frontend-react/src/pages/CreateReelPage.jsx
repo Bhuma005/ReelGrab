@@ -7,7 +7,7 @@ import { automationApi } from '../api/automation';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { toast } from 'sonner';
-import { Loader2, Download, Wand2, MonitorPlay, Play, Check, Sparkles, CheckCircle2, RotateCcw, XCircle, Clock } from 'lucide-react';
+import { Loader2, Download, Wand2, MonitorPlay, Play, Check, Sparkles, CheckCircle2, RotateCcw, XCircle, Clock, RefreshCw } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function CreateReelPage() {
