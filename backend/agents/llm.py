@@ -9,12 +9,12 @@ def get_optimal_model() -> str:
     """Return user's chosen high-intelligence model."""
     return "qwen2.5:7b"
 
-def call_ollama(model: str = None, system_prompt: str = "", user_prompt: str = "", temperature: float = 0.7, max_retries: int = 1) -> dict:
-    """Call Qwen 2.5 7B with lean 140-token budget for fast high-quality CPU inference."""
+def call_ollama(model: str = None, system_prompt: str = "", user_prompt: str = "", temperature: float = 0.7, max_retries: int = 2) -> dict:
+    """Call local Qwen 2.5 7B via Ollama with strict JSON enforcement and single retry."""
     if not model:
         model = "qwen2.5:7b"
 
-    timeout = 60.0
+    timeout = 75.0
 
     payload = {
         "model": model,
@@ -24,7 +24,7 @@ def call_ollama(model: str = None, system_prompt: str = "", user_prompt: str = "
         "stream": False,
         "options": {
             "temperature": temperature,
-            "num_predict": 220,
+            "num_predict": 260,
             "num_thread": 8,
         }
     }
@@ -46,9 +46,11 @@ def call_ollama(model: str = None, system_prompt: str = "", user_prompt: str = "
                 return json.loads(raw)
         except json.JSONDecodeError as e:
             last_err = e
+            # On parse error, retry once with explicit strict JSON reminder
+            payload["prompt"] = user_prompt + "\n\nCRITICAL: Return ONLY valid JSON matching schema. Do not truncate."
         except Exception as e:
             last_err = e
             break
 
-    logger.warning(f"Fast Ollama call ({model}) finished with: {last_err}")
+    logger.warning(f"Ollama call ({model}) finished with: {last_err}")
     return {}

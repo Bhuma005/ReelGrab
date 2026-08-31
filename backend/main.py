@@ -492,7 +492,7 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
             job["result"] = result_payload
             return
 
-        from backend.agents.master_agent import MasterAgent
+        from backend.agents.master_agent import MasterAgent, backfill_hashtags
         from backend.agents.base import AgentState
 
         agent = MasterAgent()
@@ -506,14 +506,15 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         try:
             final_state = await asyncio.wait_for(
                 asyncio.to_thread(agent.run, initial_state),
-                timeout=65.0
+                timeout=75.0
             )
         except Exception as e:
-            logger.warning(f"AI job {job_id} fast fallback due to: {e}")
+            logger.warning(f"AI job {job_id} fallback due to: {e}")
             desc_clean = re.sub(r'#\w+', '', description or '').strip()
             first_line = desc_clean.split('\n')[0].strip() if desc_clean else ''
             topic = first_line[:55] if (not title or title.lower().startswith('video by') or title.lower().startswith('reel by')) else title
             fallback_title = f"{topic} 🔥" if topic else "Trending Viral Short"
+            guaranteed_fallback_tags = backfill_hashtags([], fallback_title, desc_clean, min_count=7)
             final_state = AgentState({
                 "metadata": {
                     "status": "success",
@@ -521,9 +522,10 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
                     "title_candidates": [{"title": fallback_title, "strategy": "Curiosity", "score": 92}],
                     "viewer_appeal_score": 90,
                     "title_reason": ["Extracted from caption context"],
-                    "description": f"{description or 'Watch this trending video!'}\n\n#Shorts #Viral #Trending",
-                    "youtube_hashtags": ["#Shorts", "#Viral", "#Trending", "#ShortsFeed"],
-                    "instagram_hashtags": ["#reels", "#viralreels", "#explorepage"],
+                    "description": f"{desc_clean[:180] or 'Watch this trending video!'}\n\nWhat do you think? Let us know below! 👇\n\n👉 Subscribe for daily shorts!\n#Shorts #Viral",
+                    "youtube_hashtags": guaranteed_fallback_tags,
+                    "instagram_hashtags": guaranteed_fallback_tags,
+                    "ai_failed": True
                 },
                 "posting": {"scheduled_time": "19:30", "score": 95, "reason": "Standard peak evening engagement slot."}
             })
@@ -537,16 +539,18 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         
         best_title = metadata.get("best_title") or title or "Untitled Reel"
         desc = metadata.get("description") or description or ""
-        youtube_tags = metadata.get("youtube_hashtags", [])
-        instagram_tags = metadata.get("instagram_hashtags", [])
-        ai_failed = metadata.get("status") == "failed"
+        raw_yt = metadata.get("youtube_hashtags", [])
+        raw_ig = metadata.get("instagram_hashtags", [])
+        youtube_tags = backfill_hashtags(raw_yt, best_title, desc, min_count=7)
+        instagram_tags = backfill_hashtags(raw_ig, best_title, desc, min_count=7)
+        ai_failed = metadata.get("ai_failed", False) or metadata.get("status") == "failed"
         
         raw_result = {
             "title": best_title,
             "description": desc,
             "youtube_hashtags": youtube_tags,
             "instagram_hashtags": instagram_tags,
-            "title_candidates": metadata.get("title_candidates", []),
+            "title_candidates": metadata.get("title_candidates", [{"title": best_title, "strategy": "High-CTR Algorithm Hook", "score": 95}]),
             "viewer_appeal_score": metadata.get("viewer_appeal_score", 90),
             "title_reason": metadata.get("title_reason", ["High viral hook potential", "Optimized search query"]),
             "posting_recommendation": posting,
@@ -579,7 +583,7 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         logger.warning(f"AI job {job_id} error: {e}. Falling back to instant metadata.")
         fallback_title = title or "Trending Reel"
         fallback_desc = description or "Watch this trending video! #Shorts #Viral"
-        fallback_tags = ["#Shorts", "#Viral", "#Trending", "#Reel"]
+        fallback_tags = backfill_hashtags([], fallback_title, fallback_desc, min_count=7)
         
         raw_result = {
             "title": fallback_title,
@@ -590,7 +594,7 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
             "viewer_appeal_score": 85,
             "title_reason": ["Fast fallback metadata"],
             "posting_recommendation": {"human_readable_time": "07:30 PM", "reason": "Peak evening engagement."},
-            "ai_failed": False,
+            "ai_failed": True,
             "fallback": True
         }
         
@@ -603,7 +607,7 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
             "confidence_notes": "READY",
             "scheduled_time": "07:30 PM",
             "raw_result": raw_result,
-            "ai_failed": False
+            "ai_failed": True
         }
         
         job["status"] = "COMPLETED"

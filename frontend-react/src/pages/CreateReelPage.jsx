@@ -355,17 +355,22 @@ export default function CreateReelPage() {
                   {store.aiAnalysisResult ? (
                     <>
                       {/* Best Title */}
-                      <div className="space-y-2 bg-accent/5 p-4 rounded border border-accent/20">
-                        <div className="flex justify-between items-end pb-1">
-                          <div className="text-[10px] uppercase text-text-muted font-bold tracking-wider">BEST TITLE</div>
+                      <div className="space-y-2 bg-accent/5 p-4 rounded-lg border border-accent/20">
+                        <div className="flex justify-between items-center pb-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase text-text-muted font-bold tracking-wider">VIRAL TITLE</span>
+                            {store.aiAnalysisResult.ai_failed && (
+                              <span className="text-[9px] bg-warning/20 text-warning px-1.5 py-0.5 rounded border border-warning/30 font-medium">From video caption</span>
+                            )}
+                          </div>
                           {store.aiAnalysisResult.raw_result?.viewer_appeal_score && (
-                            <div className="text-xs font-mono text-accent">Viewer Appeal: {store.aiAnalysisResult.raw_result.viewer_appeal_score}/100</div>
+                            <div className="text-xs font-mono font-bold text-accent">Viewer Appeal: {store.aiAnalysisResult.raw_result.viewer_appeal_score}/100</div>
                           )}
                         </div>
-                        <div className="text-base font-bold">"{store.aiAnalysisResult.viral_title}"</div>
+                        <div className="text-base font-bold text-foreground">"{store.aiAnalysisResult.viral_title}"</div>
                         
                         {store.aiAnalysisResult.raw_result?.title_reason && (
-                          <div className="pt-2 mt-2 border-t border-accent/10">
+                          <div className="pt-2 mt-2 border-t border-accent/10 flex flex-wrap gap-x-3 gap-y-1">
                             {store.aiAnalysisResult.raw_result.title_reason.map((reason, i) => (
                               <div key={i} className="text-xs text-text-muted flex items-center gap-1.5">
                                 <span className="text-success">✓</span> {reason}
@@ -375,64 +380,73 @@ export default function CreateReelPage() {
                         )}
                       </div>
 
-                      {/* Other Titles */}
-                      {store.aiAnalysisResult.raw_result?.title_candidates && store.aiAnalysisResult.raw_result.title_candidates.length > 0 && (
-                        <div className="space-y-2">
-                          <div className="text-[10px] uppercase text-text-muted font-bold tracking-wider">OTHER OPTIONS</div>
-                          <div className="space-y-2">
-                            {store.aiAnalysisResult.raw_result.title_candidates.filter(t => t.title !== store.aiAnalysisResult.viral_title).slice(0,3).map((t, i) => (
-                              <div key={i} className="text-xs text-text-muted flex flex-col gap-0.5">
-                                <span className="text-[10px] capitalize opacity-60 flex items-center gap-1">
-                                  {t.strategy === 'search' ? '🔍' : t.strategy === 'emotional' ? '❤️' : t.strategy === 'curiosity' ? '👀' : '✨'} {t.strategy}
-                                </span> 
-                                <span className="font-medium text-foreground">"{t.title}"</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
                       {/* Description */}
-                      <div className="space-y-2 pt-4 border-t border-border/50">
-                        <div className="text-[10px] uppercase text-text-muted font-bold tracking-wider">DESCRIPTION</div>
-                        <div className="text-xs text-text-muted bg-surface-elevated p-3 rounded">
+                      <div className="space-y-2 pt-2">
+                        <div className="flex items-center justify-between">
+                          <div className="text-[10px] uppercase text-text-muted font-bold tracking-wider">SEARCH-OPTIMIZED DESCRIPTION</div>
+                          <Button 
+                            variant="ghost" 
+                            className="h-5 px-2 text-[10px] text-text-muted hover:text-foreground"
+                            onClick={() => {
+                              navigator.clipboard.writeText(store.aiAnalysisResult.optimized_description || "");
+                              toast.success("Description copied to clipboard!");
+                            }}
+                          >
+                            Copy description
+                          </Button>
+                        </div>
+                        <div className="text-xs text-foreground/90 bg-surface-elevated p-3.5 rounded-lg border border-border/60 leading-relaxed whitespace-pre-line font-sans">
                           {store.aiAnalysisResult.optimized_description}
                         </div>
                       </div>
 
-                      {/* Hashtags */}
-                      <div className="space-y-4 pt-4 border-t border-border/50">
+                      {/* Dedicated Hashtags Section */}
+                      <div className="space-y-3 pt-2">
                         <div className="flex items-center justify-between">
-                           <div className="text-[10px] uppercase text-text-muted font-bold tracking-wider">HASHTAGS</div>
-                           {store.aiAnalysisResult.ai_failed && (
-                             <span className="text-[9px] bg-warning/20 text-warning px-1.5 py-0.5 rounded border border-warning/30">FROM CAPTION</span>
-                           )}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] uppercase text-text-muted font-bold tracking-wider">HASHTAGS</span>
+                            <span className="text-[10px] bg-surface px-2 py-0.5 rounded-full border border-border font-mono text-text-muted">
+                              {(store.aiAnalysisResult.youtube || []).length} tags
+                            </span>
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            className="h-6 px-2.5 text-xs bg-surface hover:bg-surface-elevated text-accent border border-border/80 flex items-center gap-1"
+                            onClick={() => {
+                              const tags = (store.aiAnalysisResult.youtube || []).join(' ');
+                              navigator.clipboard.writeText(tags);
+                              toast.success(`Copied ${(store.aiAnalysisResult.youtube || []).length} hashtags!`);
+                            }}
+                          >
+                            Copy all
+                          </Button>
                         </div>
 
-                        {/* YouTube Tags */}
-                        <div className="space-y-2">
-                           <div className="flex items-center justify-between">
-                             <div className="text-[10px] font-bold text-[#FF0000] flex items-center gap-1">YOUTUBE SHORTS</div>
-                             <Button variant="ghost" className="h-5 px-2 text-[10px] bg-surface hover:bg-surface-elevated" onClick={() => navigator.clipboard.writeText((store.aiAnalysisResult.youtube || []).join(' '))}>Copy all</Button>
-                           </div>
-                           <div className="flex flex-wrap gap-1.5">
-                             {store.aiAnalysisResult.youtube?.map((t, i) => (
-                               <span key={i} className="text-[10px] px-2 py-1 bg-surface-elevated text-accent border border-accent/20 rounded-full">{t}</span>
-                             ))}
-                           </div>
-                        </div>
-
-                        {/* Instagram Tags */}
-                        <div className="space-y-2">
-                           <div className="flex items-center justify-between">
-                             <div className="text-[10px] font-bold text-[#E1306C] flex items-center gap-1">INSTAGRAM REELS</div>
-                             <Button variant="ghost" className="h-5 px-2 text-[10px] bg-surface hover:bg-surface-elevated" onClick={() => navigator.clipboard.writeText((store.aiAnalysisResult.instagram || []).join(' '))}>Copy all</Button>
-                           </div>
-                           <div className="flex flex-wrap gap-1.5">
-                             {store.aiAnalysisResult.instagram?.map((t, i) => (
-                               <span key={i} className="text-[10px] px-2 py-1 bg-surface-elevated text-accent border border-accent/20 rounded-full">{t}</span>
-                             ))}
-                           </div>
+                        {/* Editable / Removable Hashtag Chips */}
+                        <div className="flex flex-wrap gap-1.5 p-3 bg-surface rounded-lg border border-border/60 min-h-[50px]">
+                          {(store.aiAnalysisResult.youtube || []).map((tag, idx) => (
+                            <span 
+                              key={idx} 
+                              className="group text-xs px-2.5 py-1 bg-surface-elevated hover:bg-surface-elevated/80 text-accent border border-accent/20 rounded-full flex items-center gap-1 transition-all"
+                            >
+                              <span>{tag}</span>
+                              <button 
+                                type="button"
+                                className="w-3.5 h-3.5 rounded-full hover:bg-danger/20 hover:text-danger text-text-muted inline-flex items-center justify-center text-[10px] transition-colors ml-0.5"
+                                title="Remove tag"
+                                onClick={() => {
+                                  const updated = (store.aiAnalysisResult.youtube || []).filter((_, i) => i !== idx);
+                                  store.setAiAnalysisResult({
+                                    ...store.aiAnalysisResult,
+                                    youtube: updated,
+                                    instagram: updated
+                                  });
+                                }}
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
                         </div>
                       </div>
 
