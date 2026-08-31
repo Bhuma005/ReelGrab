@@ -12,10 +12,14 @@ export const useVideoStore = create((set) => ({
   setFormats: (formats) => set({ formats }),
 
   aiAnalysisResult: null,
-  aiAnalysisStatus: 'idle', // 'idle', 'loading', 'success', 'error', 'timeout'
+  aiAnalysisStatus: 'idle', // 'idle', 'loading', 'success', 'error', 'timeout', 'cancelled'
   aiAnalysisError: null,
-  setAiAnalysisResult: (result) => set({ aiAnalysisResult: result, aiAnalysisStatus: 'success', aiAnalysisError: null }),
+  aiJobId: null,
+  aiProgress: 0,
+  aiStepMessage: '',
+  setAiAnalysisResult: (result) => set({ aiAnalysisResult: result, aiAnalysisStatus: 'success', aiAnalysisError: null, aiProgress: 100, aiStepMessage: 'Complete' }),
   setAiAnalysisStatus: (status, error = null) => set({ aiAnalysisStatus: status, aiAnalysisError: error }),
+  setAiJobProgress: (jobId, progress, stepMessage) => set({ aiJobId: jobId, aiProgress: progress, aiStepMessage: stepMessage }),
 
   allHashtags: [],
   setAllHashtags: (hashtags) => set({ allHashtags: hashtags }),
@@ -30,6 +34,9 @@ export const useVideoStore = create((set) => ({
     aiAnalysisResult: null,
     aiAnalysisStatus: 'idle',
     aiAnalysisError: null,
+    aiJobId: null,
+    aiProgress: 0,
+    aiStepMessage: '',
     allHashtags: [],
     isOpusMode: false,
   })

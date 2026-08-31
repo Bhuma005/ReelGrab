@@ -17,4 +17,8 @@ export const metadataApi = {
     method: 'POST',
     body: JSON.stringify({ title, description, url })
   }),
+  getAnalysisStatus: (jobId) => fetchApi(`/api/analyze/status/${jobId}`),
+  cancelAnalysis: (jobId) => fetchApi(`/api/analyze/cancel/${jobId}`, {
+    method: 'POST'
+  }),
 };

@@ -36,6 +36,8 @@ class AutomateRequest(BaseModel):
     thumbnail_url: Optional[str] = None
     url: str
     opus_mode: Optional[bool] = False
+    iso_schedule: Optional[str] = None
+    scheduled_time_human: Optional[str] = None
     # Optional enrichment fields (sent from frontend if available)
     duration_seconds: Optional[int] = None
     transcript: Optional[str] = None
@@ -44,72 +46,62 @@ class AutomateRequest(BaseModel):
     target_region: Optional[str] = "India"
 
 
-@router.post("/automate", summary="Trigger Cloud Automation Pipeline", description="Downloads video, analyzes metadata via LLM, and schedules for upload to Supabase.")
+@router.post("/automate", summary="Trigger Cloud Automation Pipeline", description="Downloads video, applies layout, and schedules for upload to Supabase.")
 async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTasks):
     logger.info(f"🚀 Starting automation pipeline for: {req.url}")
     
-    # 1. Generate optimal trending metadata & schedule via AI
-    result = await asyncio.to_thread(
-        generate_shorts_content,
-        video_title=req.title,
-        video_description=req.description,
-        hashtags=req.hashtags,
-        duration_seconds=req.duration_seconds,
-        transcript=req.transcript,
-        detected_genre=req.detected_genre,
-        detected_language=req.detected_language or "English",
-        target_region=req.target_region or "India",
-        temperature=0.8,
-    )
-
-    opt_title = result.get("title", req.title)
-    opt_desc = result.get("description", req.description)
-    opt_tags = result.get("hashtags", req.hashtags)
-    sched_time = result.get("optimal_schedule_time", "07:30 PM") 
+    opt_title = req.title
+    opt_desc = req.description
+    opt_tags = req.hashtags
+    sched_time = req.scheduled_time_human or "07:30 PM" 
     
-    # ── Intelligent Date Scheduling (Max 2 per day) ──
-    try:
-        parsed_time = dateutil.parser.parse(sched_time).time()
-        now = datetime.now()
-        target_date = now.date()
-        target_dt = datetime.combine(target_date, parsed_time)
-        
-        # 1. If today's time has already passed, start checking from tomorrow
-        if target_dt < now:
-            target_date += timedelta(days=1)
+    if req.iso_schedule:
+        final_iso_schedule = req.iso_schedule
+        human_readable_time = req.scheduled_time_human or "07:30 PM"
+    else:
+        # ── Intelligent Date Scheduling (Max 2 per day) ──
+        try:
+            parsed_time = dateutil.parser.parse(sched_time).time()
+            now = datetime.now()
+            target_date = now.date()
             target_dt = datetime.combine(target_date, parsed_time)
             
-        # 2. Query Supabase to ensure MAX 2 posts per day!
-        sb = get_supabase_client()
-        while True:
-            # Check how many videos are scheduled between start and end of target_date
-            start_of_day = datetime.combine(target_date, datetime.min.time()).astimezone().isoformat()
-            end_of_day = datetime.combine(target_date, datetime.max.time()).astimezone().isoformat()
-            
-            res = sb.table("scheduled_videos").select("id", count="exact") \
-                .gte("schedule_time", start_of_day) \
-                .lte("schedule_time", end_of_day).execute()
+            # 1. If today's time has already passed, start checking from tomorrow
+            if target_dt < now:
+                target_date += timedelta(days=1)
+                target_dt = datetime.combine(target_date, parsed_time)
                 
-            # 'count' attribute contains the total matching rows in Supabase
-            daily_count = res.count if res.count is not None else len(res.data)
-            
-            if daily_count < 2:
-                # We have space on this day!
-                break
+            # 2. Query Supabase to ensure MAX 2 posts per day!
+            sb = get_supabase_client()
+            while True:
+                # Check how many videos are scheduled between start and end of target_date
+                start_of_day = datetime.combine(target_date, datetime.min.time()).astimezone().isoformat()
+                end_of_day = datetime.combine(target_date, datetime.max.time()).astimezone().isoformat()
                 
-            # If 2 or more videos are already scheduled on this day, push exactly 24 hours forward!
-            target_date += timedelta(days=1)
-            target_dt = datetime.combine(target_date, parsed_time)
+                res = sb.table("scheduled_videos").select("id", count="exact") \
+                    .gte("schedule_time", start_of_day) \
+                    .lte("schedule_time", end_of_day).execute()
+                    
+                # 'count' attribute contains the total matching rows in Supabase
+                daily_count = res.count if res.count is not None else len(res.data)
+                
+                if daily_count < 2:
+                    # We have space on this day!
+                    break
+                    
+                # If 2 or more videos are already scheduled on this day, push exactly 24 hours forward!
+                target_date += timedelta(days=1)
+                target_dt = datetime.combine(target_date, parsed_time)
+                
+            final_iso_schedule = target_dt.astimezone().isoformat()
+            human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
             
-        final_iso_schedule = target_dt.astimezone().isoformat()
-        human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
-        
-    except Exception as e:
-        logger.error(f"Time parsing Error: {e}")
-        # Fallback to right now + 2 hours if parse fails entirely
-        target_dt = datetime.now() + timedelta(hours=2)
-        final_iso_schedule = target_dt.astimezone().isoformat()
-        human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
+        except Exception as e:
+            logger.error(f"Time parsing Error: {e}")
+            # Fallback to right now + 2 hours if parse fails entirely
+            target_dt = datetime.now() + timedelta(hours=2)
+            final_iso_schedule = target_dt.astimezone().isoformat()
+            human_readable_time = target_dt.strftime("%B %d, %I:%M %p")
 
     # 2. Download the video locally to a temporary location
     downloads_dir = Path(__file__).parent.parent / "downloads"
@@ -181,9 +173,9 @@ async def automate_pipeline(req: AutomateRequest, background_tasks: BackgroundTa
             "hashtags":           opt_tags,
             "scheduled_time":     human_readable_time,
             "iso_schedule":       final_iso_schedule,
-            "reasoning":          result.get("schedule_reasoning", "Peak engagement window."),
-            "confidence_notes":   result.get("confidence_notes", ""),
+            "reasoning":          "Peak engagement window.",
+            "confidence_notes":   "",
             "post_status":        "Scheduled 🚀",
-            "model_used":         "See confidence_notes"
+            "model_used":         "Pre-calculated in frontend"
         }
     }

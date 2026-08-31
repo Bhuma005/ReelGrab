@@ -7,7 +7,7 @@ import { automationApi } from '../api/automation';
 import { Button } from '../components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { toast } from 'sonner';
-import { Loader2, Download, Wand2, MonitorPlay, Play, Check } from 'lucide-react';
+import { Loader2, Download, Wand2, MonitorPlay, Play, Check, Sparkles, CheckCircle2, RotateCcw, XCircle, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function CreateReelPage() {
@@ -18,10 +18,113 @@ export default function CreateReelPage() {
   const [isAutomating, setIsAutomating] = React.useState(false);
   const [automationResult, setAutomationResult] = React.useState(null);
 
+  const pollTimerRef = React.useRef(null);
+
+  const stopPolling = () => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  };
+
+  React.useEffect(() => {
+    return () => stopPolling();
+  }, []);
+
+  const startAiAnalysis = async (title, description, videoUrl) => {
+    stopPolling();
+    store.setAiAnalysisStatus('loading');
+    store.setAiJobProgress(null, 10, 'Queued for processing...');
+
+    try {
+      const initRes = await metadataApi.analyze(title, description, videoUrl);
+      if (!initRes) {
+        store.setAiAnalysisStatus('error', 'Failed to initialize AI analysis');
+        return;
+      }
+
+      if (initRes.status === 'COMPLETED' && initRes.result) {
+        store.setAiAnalysisResult(initRes.result);
+        if (initRes.cached) {
+          toast.success("⚡ Instant AI optimization loaded from cache!");
+        }
+        return;
+      }
+
+      const jobId = initRes.job_id;
+      if (!jobId) {
+        store.setAiAnalysisStatus('error', 'No job ID received from server');
+        return;
+      }
+
+      store.setAiJobProgress(jobId, initRes.progress || 15, initRes.current_step || 'Processing video...');
+
+      // Start Polling every 1.5 seconds
+      let pollCount = 0;
+      const MAX_POLLS = 200; // ~300 seconds timeout limit
+
+      pollTimerRef.current = setInterval(async () => {
+        pollCount++;
+        if (pollCount > MAX_POLLS) {
+          stopPolling();
+          store.setAiAnalysisStatus('timeout', 'AI analysis timed out after 5 minutes.');
+          return;
+        }
+
+        try {
+          const statusRes = await metadataApi.getAnalysisStatus(jobId);
+          if (!statusRes) return;
+
+          if (statusRes.status === 'COMPLETED' && statusRes.result) {
+            stopPolling();
+            store.setAiAnalysisResult(statusRes.result);
+            toast.success("✨ AI Content Optimization complete!");
+          } else if (statusRes.status === 'FAILED') {
+            stopPolling();
+            store.setAiAnalysisStatus('error', statusRes.error || 'AI analysis failed');
+          } else if (statusRes.status === 'CANCELLED') {
+            stopPolling();
+            store.setAiAnalysisStatus('cancelled', 'AI analysis was cancelled');
+          } else {
+            store.setAiJobProgress(jobId, statusRes.progress || 20, statusRes.current_step || 'Working...');
+          }
+        } catch (pollErr) {
+          console.warn("Polling error:", pollErr);
+        }
+      }, 1500);
+
+    } catch (err) {
+      console.error(err);
+      store.setAiAnalysisStatus('error', err.message || 'Failed to start AI optimization');
+    }
+  };
+
+  const handleCancelAi = async () => {
+    stopPolling();
+    if (store.aiJobId) {
+      try {
+        await metadataApi.cancelAnalysis(store.aiJobId);
+      } catch (e) {
+        console.warn("Cancel request failed", e);
+      }
+    }
+    store.setAiAnalysisStatus('cancelled', 'AI analysis was cancelled.');
+    toast.info("AI Analysis cancelled");
+  };
+
+  const handleRetryAi = () => {
+    if (store.metadata?.title || store.metadata?.description || store.url) {
+      startAiAnalysis(store.metadata?.title, store.metadata?.description, store.url);
+    } else {
+      handleFetch();
+    }
+  };
+
   const handleFetch = async () => {
     if (!store.url.trim()) return;
     
     setIsLoading(true);
+    stopPolling();
     store.resetWorkflow(); // clears previous results but we need the url back
     const targetUrl = store.url.trim();
     store.setUrl(targetUrl);
@@ -43,27 +146,8 @@ export default function CreateReelPage() {
         const tags = meta.hashtags || [];
         if (tags.length > 0) store.setAllHashtags(tags);
 
-        if (meta.title || meta.description) {
-          store.setAiAnalysisStatus('loading');
-          metadataApi.analyze(meta.title, meta.description, store.url)
-            .then(analysis => {
-              if (analysis && analysis.success === false) {
-                 if (analysis.error?.toLowerCase().includes('timeout')) {
-                     store.setAiAnalysisStatus('timeout', analysis.error);
-                 } else {
-                     store.setAiAnalysisStatus('error', analysis.error);
-                 }
-              }
-              else if (analysis) {
-                store.setAiAnalysisResult(analysis);
-              } else {
-                store.setAiAnalysisStatus('error', 'Received empty response from AI');
-              }
-            })
-            .catch(err => {
-              console.error(err);
-              store.setAiAnalysisStatus('error', err.message || 'Network error during AI optimization');
-            });
+        if (meta.title || meta.description || targetUrl) {
+          startAiAnalysis(meta.title, meta.description, targetUrl);
         }
       });
 
@@ -104,12 +188,14 @@ export default function CreateReelPage() {
     setIsAutomating(true);
     try {
       const payload = {
-        title: store.metadata.title || 'Untitled',
+        title: store.aiAnalysisResult?.viral_title || store.metadata.title || 'Untitled',
         description: store.aiAnalysisResult?.optimized_description || store.metadata.description || '',
         hashtags: store.allHashtags || [],
         thumbnail_url: store.metadata.thumbnail_url || '',
         url: store.url,
-        opus_mode: store.isOpusMode
+        opus_mode: store.isOpusMode,
+        iso_schedule: store.aiAnalysisResult?.raw_result?.posting_recommendation?.iso_time || store.aiAnalysisResult?.iso_schedule || null,
+        scheduled_time_human: store.aiAnalysisResult?.scheduled_time || null
       };
       
       const res = await automationApi.triggerAutomation(payload);
@@ -363,43 +449,123 @@ export default function CreateReelPage() {
                       </div>
                     </>
                   ) : store.aiAnalysisStatus === 'loading' ? (
-                    <div className="space-y-6 animate-pulse">
-                      <div className="space-y-2">
-                        <div className="h-3 w-24 bg-surface-elevated rounded"></div>
-                        <div className="h-10 w-full bg-surface-elevated rounded"></div>
+                    <div className="space-y-5 p-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-accent font-semibold text-xs tracking-wider uppercase">
+                          <Sparkles className="w-4 h-4 animate-spin text-accent" />
+                          <span>AI Processing In Background</span>
+                        </div>
+                        <span className="text-xs font-mono font-bold bg-accent/10 text-accent px-2 py-0.5 rounded border border-accent/20">
+                          {store.aiProgress}%
+                        </span>
                       </div>
-                      <div className="space-y-2">
-                        <div className="h-3 w-32 bg-surface-elevated rounded"></div>
-                        <div className="h-16 w-full bg-surface-elevated rounded"></div>
+
+                      {/* Progress Bar */}
+                      <div className="w-full bg-surface-elevated h-2 rounded-full overflow-hidden border border-border">
+                        <div 
+                          className="bg-gradient-to-r from-accent to-[#C88A3B] h-full transition-all duration-500 rounded-full"
+                          style={{ width: `${Math.max(store.aiProgress, 8)}%` }}
+                        />
                       </div>
-                      <div className="space-y-3">
-                        <div className="h-3 w-20 bg-surface-elevated rounded"></div>
-                        <div className="space-y-2">
-                          <div className="flex gap-2"><div className="h-5 w-16 bg-surface-elevated rounded-full"></div><div className="h-5 w-24 bg-surface-elevated rounded-full"></div><div className="h-5 w-20 bg-surface-elevated rounded-full"></div></div>
-                          <div className="flex gap-2"><div className="h-5 w-24 bg-surface-elevated rounded-full"></div><div className="h-5 w-16 bg-surface-elevated rounded-full"></div><div className="h-5 w-24 bg-surface-elevated rounded-full"></div><div className="h-5 w-16 bg-surface-elevated rounded-full"></div></div>
+
+                      {/* Step By Step Tracker */}
+                      <div className="space-y-2.5 text-xs font-mono">
+                        <div className="flex items-center gap-2.5">
+                          {store.aiProgress >= 25 ? (
+                            <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                          ) : (
+                            <div className="w-4 h-4 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">1</div>
+                          )}
+                          <span className={store.aiProgress >= 25 ? "text-foreground font-medium" : "text-text-muted"}>
+                            Extract transcript & audio cues
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          {store.aiProgress >= 50 ? (
+                            <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                          ) : (
+                            <div className="w-4 h-4 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">2</div>
+                          )}
+                          <span className={store.aiProgress >= 50 ? "text-foreground font-medium" : "text-text-muted"}>
+                            Analyze viral hooks & audience retention
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          {store.aiProgress >= 75 ? (
+                            <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                          ) : (
+                            <div className="w-4 h-4 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">3</div>
+                          )}
+                          <span className={store.aiProgress >= 75 ? "text-foreground font-medium" : "text-text-muted"}>
+                            Generate high-CTR titles & viral tags
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          {store.aiProgress >= 100 ? (
+                            <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+                          ) : (
+                            <div className="w-4 h-4 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">4</div>
+                          )}
+                          <span className={store.aiProgress >= 100 ? "text-foreground font-medium" : "text-text-muted"}>
+                            Calculate optimal posting window
+                          </span>
                         </div>
                       </div>
-                      <div className="text-xs text-accent flex items-center gap-2 pt-4">
-                        <Loader2 className="w-3 h-3 animate-spin" /> AI analyzing video content...
+
+                      {/* Current message and Cancel button */}
+                      <div className="pt-3 border-t border-border flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-text-muted truncate">
+                          {store.aiStepMessage || "Processing with local LLM..."}
+                        </p>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-7 text-xs text-danger hover:bg-danger/10 flex items-center gap-1 flex-shrink-0"
+                          onClick={handleCancelAi}
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Cancel
+                        </Button>
                       </div>
+
+                      <div className="bg-background p-2.5 rounded border border-border/60 text-[11px] text-text-muted">
+                        💡 <strong>Non-blocking:</strong> You can download formats or configure settings below while AI runs.
+                      </div>
+                    </div>
+                  ) : store.aiAnalysisStatus === 'cancelled' ? (
+                    <div className="py-6 flex flex-col items-center justify-center text-center space-y-3">
+                      <div className="w-10 h-10 rounded-full bg-surface-elevated flex items-center justify-center text-text-muted mb-1">
+                        <XCircle className="w-5 h-5" />
+                      </div>
+                      <h3 className="font-bold text-sm">AI Analysis Cancelled</h3>
+                      <p className="text-xs text-text-muted max-w-[280px]">You stopped the background AI worker. You can still download the video or retry AI.</p>
+                      <Button variant="outline" size="sm" onClick={handleRetryAi} className="text-xs">
+                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Restart AI Analysis
+                      </Button>
                     </div>
                   ) : store.aiAnalysisStatus === 'timeout' ? (
                     <div className="py-8 flex flex-col items-center justify-center text-center space-y-3">
                       <div className="w-10 h-10 rounded-full bg-warning/10 flex items-center justify-center text-warning mb-2">
-                        <span className="text-xl">⏱️</span>
+                        <Clock className="w-5 h-5" />
                       </div>
-                      <h3 className="font-bold">AI Optimization Timed Out</h3>
-                      <p className="text-xs text-text-muted max-w-[250px]">{store.aiAnalysisError || "The AI took too long to respond. You can try again or proceed without AI metadata."}</p>
-                      <Button variant="outline" size="sm" onClick={() => handleFetch()}>Try Again</Button>
+                      <h3 className="font-bold text-sm">AI Optimization Timed Out</h3>
+                      <p className="text-xs text-text-muted max-w-[280px]">{store.aiAnalysisError || "The AI took too long to respond. You can retry or proceed using existing video details."}</p>
+                      <Button variant="outline" size="sm" onClick={handleRetryAi} className="text-xs">
+                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Try Again
+                      </Button>
                     </div>
                   ) : store.aiAnalysisStatus === 'error' ? (
                     <div className="py-8 flex flex-col items-center justify-center text-center space-y-3">
                       <div className="w-10 h-10 rounded-full bg-danger/10 flex items-center justify-center text-danger mb-2">
                         <span className="text-xl">⚠️</span>
                       </div>
-                      <h3 className="font-bold">AI Optimization Failed</h3>
-                      <p className="text-xs text-text-muted max-w-[250px]">{store.aiAnalysisError || "An error occurred while generating metadata."}</p>
-                      <Button variant="outline" size="sm" onClick={() => handleFetch()}>Retry AI Analysis</Button>
+                      <h3 className="font-bold text-sm">AI Optimization Failed</h3>
+                      <p className="text-xs text-text-muted max-w-[280px]">{store.aiAnalysisError || "An error occurred while generating metadata."}</p>
+                      <Button variant="outline" size="sm" onClick={handleRetryAi} className="text-xs">
+                        <RotateCcw className="w-3.5 h-3.5 mr-1" /> Retry AI Analysis
+                      </Button>
                     </div>
                   ) : null}
                 </CardContent>
