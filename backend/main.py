@@ -1015,8 +1015,6 @@ async def get_dashboard_logs(limit: int = 50):
     }
 
 
-@app.get("/api/health", summary="System Health Audit", description="Reports health of Backend, Supabase Database, Storage, Ollama GenAI, and YouTube Auth.")
-async def health_check():
 HEALTH_CACHE = {
     "data": None,
     "last_check": 0
