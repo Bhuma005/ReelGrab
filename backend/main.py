@@ -643,13 +643,31 @@ async def get_dashboard_stats():
         logger.error(f"Dashboard Stats error: {e}")
         return {"total": 0, "scheduled": 0, "processing": 0, "published": 0, "cleaned": 0, "failed": 0, "pending": 0, "uploaded": 0, "error": str(e)}
 
-@app.get("/api/dashboard/videos", summary="Get Video Queue", description="Fetch recently scheduled videos for preview in the dashboard ui.")
-async def get_dashboard_videos():
+@app.get("/api/dashboard/videos", summary="Get Video Queue", description="Fetch videos for the library with optional pagination, status filter, and search.")
+async def get_dashboard_videos(
+    page: int = 1,
+    limit: int = 20,
+    status: Optional[str] = None,
+    search: Optional[str] = None
+):
     from cloud.cloud_auth import get_supabase_client
     try:
         sb = get_supabase_client()
-        res = sb.table("video_library").select("*").order("created_at", desc=True).limit(20).execute()
-        videos = res.data
+        query = sb.table("video_library").select("*", count="exact")
+        
+        if status and status.lower() != 'all':
+            query = query.eq("status", status.lower())
+            
+        if search and search.strip():
+            query = query.ilike("title", f"%{search.strip()}%")
+            
+        start = max(0, (page - 1) * limit)
+        end = start + limit - 1
+        
+        res = query.order("created_at", desc=True).range(start, end).execute()
+        videos = res.data or []
+        total_count = res.count if getattr(res, "count", None) is not None else len(videos)
+        
         for v in videos:
             if v.get("storage_path") and v.get("status") not in ['cleaned', 'published']:
                 try:
@@ -658,10 +676,17 @@ async def get_dashboard_videos():
                 except Exception as e:
                     logger.error(f"Failed to generate signed url: {e}")
             v["storage_exists"] = bool(v.get("storage_path"))
-        return {"videos": videos}
+            
+        return {
+            "videos": videos,
+            "total": total_count,
+            "page": page,
+            "limit": limit,
+            "total_pages": max(1, (total_count + limit - 1) // limit) if total_count > 0 else 1
+        }
     except Exception as e:
         logger.error(f"Dashboard Videos error: {e}")
-        return {"videos": [], "error": str(e)}
+        return {"videos": [], "total": 0, "page": page, "limit": limit, "total_pages": 1, "error": str(e)}
 
 
 @app.delete("/api/dashboard/videos/{video_id}", summary="Delete a video", description="Deletes video from Supabase Storage and DB.")
@@ -904,20 +929,35 @@ async def publish_dashboard_video(video_id: str):
         return {"status": "error", "message": str(e) + " - " + traceback.format_exc()[:200]}
 
 
-@app.get("/api/dashboard/logs", summary="Get audit logs", description="Returns the audit log history.")
-async def get_dashboard_logs():
+@app.get("/api/dashboard/logs", summary="Get audit logs", description="Returns structured Supabase activity events and audit log history.")
+async def get_dashboard_logs(limit: int = 50):
+    from cloud.cloud_auth import get_supabase_client
     import os
-    logs = []
+    
+    # 1. Fetch structured activity events from video_activity_log
+    activity_events = []
+    try:
+        sb = get_supabase_client()
+        res = sb.table("video_activity_log").select("*, video_library(title, status, youtube_url)").order("created_at", desc=True).limit(limit).execute()
+        activity_events = res.data or []
+    except Exception as e:
+        logger.debug(f"Activity log fetch skipped: {e}")
+
+    # 2. Fetch local audit file lines
+    local_logs = []
     log_path = "reelgrab_audit.log"
     if os.path.exists(log_path):
         with open(log_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if not line:
-                    continue
-                logs.append(line)
-    logs.reverse()
-    return {"logs": logs}
+                if line:
+                    local_logs.append(line)
+        local_logs.reverse()
+        
+    return {
+        "activity_events": activity_events,
+        "logs": local_logs[:limit]
+    }
 
 
 @app.get("/api/health", summary="System Health Audit", description="Reports health of Backend, Supabase Database, Storage, Ollama GenAI, and YouTube Auth.")
