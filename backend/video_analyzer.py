@@ -150,11 +150,12 @@ def analyze_frames_with_vision(frames_b64: List[str], vision_model: str) -> Opti
     payload = {
         'model': vision_model,
         'prompt': prompt,
-        'images': frames_b64[:4],
+        'images': [frames_b64[min(1, len(frames_b64)-1)]],  # 1 key frame for optimal CPU inference speed
         'stream': False,
         'options': {
-            'temperature': 0.3,
-            'num_predict': 180,
+            'temperature': 0.2,
+            'num_predict': 90,
+            'num_thread': 8,
         }
     }
 
@@ -165,7 +166,7 @@ def analyze_frames_with_vision(frames_b64: List[str], vision_model: str) -> Opti
             method='POST',
             headers={'Content-Type': 'application/json'}
         )
-        with urllib.request.urlopen(req, timeout=35.0) as resp:
+        with urllib.request.urlopen(req, timeout=120.0) as resp:
             data = json.loads(resp.read().decode('utf-8'))
             return data.get('response', '').strip()
     except Exception as e:
