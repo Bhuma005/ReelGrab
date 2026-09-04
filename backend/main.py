@@ -444,8 +444,8 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         ollama_alive = False
         try:
             import urllib.request
-            req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
-            with urllib.request.urlopen(req, timeout=1.5) as resp:
+            req = urllib.request.Request("http://127.0.0.1:11434/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
                 if resp.status == 200:
                     ollama_alive = True
         except Exception:
@@ -1097,8 +1097,8 @@ async def health_check():
 
         # 2. Ollama check
         try:
-            req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
-            with urllib.request.urlopen(req, timeout=1.0) as resp:
+            req = urllib.request.Request("http://127.0.0.1:11434/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
                 if resp.status == 200:
                     health["services"]["ollama"] = {"status": "ok", "message": "Ollama active"}
         except Exception:
@@ -1123,14 +1123,14 @@ async def health_check():
 async def health_check_ai():
     import urllib.request
     try:
-        req = urllib.request.Request("http://localhost:11434/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=1.5) as resp:
+        req = urllib.request.Request("http://127.0.0.1:11434/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
             if resp.status == 200:
                 return {
                     "available": True,
                     "provider": "ollama",
                     "model": "qwen2.5:7b",
-                    "endpoint": "http://localhost:11434"
+                    "endpoint": "http://127.0.0.1:11434"
                 }
     except Exception as e:
         return {
