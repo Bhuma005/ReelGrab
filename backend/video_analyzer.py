@@ -12,11 +12,18 @@ logger = logging.getLogger(__name__)
 VIDEO_ANALYSIS_CACHE: Dict[str, dict] = {}
 
 VISION_MODEL_CANDIDATES = [
-    'qwen2.5vl:7b', 'qwen2.5vl:3b', 'qwen2.5vl',
-    'qwen2.5-vl:7b', 'qwen2.5-vl:3b', 'qwen2.5-vl',
-    'llava:7b', 'llava:13b', 'llava',
-    'llama3.2-vision:11b', 'llama3.2-vision',
-    'minicpm-v', 'moondream', 'bakllava'
+    'moondream:latest',
+    'moondream',
+    'llava:latest',
+    'llava:7b',
+    'llava',
+    'qwen2.5vl:7b',
+    'qwen2.5vl:3b',
+    'qwen2.5vl',
+    'llama3.2-vision:11b',
+    'llama3.2-vision',
+    'minicpm-v',
+    'bakllava'
 ]
 
 def get_installed_vision_model() -> Optional[str]:
