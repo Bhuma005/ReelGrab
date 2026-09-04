@@ -51,6 +51,7 @@ class AnalyzeRequest(BaseModel):
     title: Optional[str] = ''
     description: Optional[str] = ''
     url: Optional[str] = ''
+    video_path: Optional[str] = ''
 
 RATE_LIMIT_STORE: Dict[str, list] = {}
 RATE_LIMIT_BURST = 5
@@ -408,7 +409,7 @@ def get_content_hash(url: str, title: str, description: str) -> str:
     combined = f"url:{url or ''}|title:{title or ''}|desc:{description or ''}".strip()
     return hashlib.sha256(combined.encode('utf-8')).hexdigest()
 
-async def execute_ai_analysis_job(job_id: str, title: str, description: str, url: str):
+async def execute_ai_analysis_job(job_id: str, title: str, description: str, url: str, video_path: str = ""):
     if job_id not in AI_JOBS_STORE:
         return
     
@@ -419,26 +420,41 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         if job.get("status") == "CANCELLED":
             return
             
-        job["status"] = "TRANSCRIBING"
+        from backend.video_analyzer import analyze_video_content
+
+        job["status"] = "ANALYZING_FRAMES"
         job["progress"] = 25
-        job["current_step"] = "Extracting video transcript and speech audio..."
+        job["current_step"] = "Inspecting video footage & extracting key frames..."
         job["started_at"] = datetime.now().isoformat()
-        await asyncio.sleep(0.6)
+        
+        # Run real local video frame & audio analyzer
+        video_analysis = await asyncio.to_thread(
+            analyze_video_content,
+            video_path=video_path,
+            url=url,
+            raw_title=title,
+            raw_description=description
+        )
         
         if job.get("status") == "CANCELLED":
             return
             
         job["status"] = "ANALYZING"
-        job["progress"] = 50
-        job["current_step"] = "Analyzing emotional hooks, pacing & viewer appeal..."
-        await asyncio.sleep(0.6)
+        job["progress"] = 55
+        if video_analysis.get("vision_success"):
+            job["current_step"] = f"Visual frames analyzed via local vision model ({video_analysis.get('vision_model_used')})..."
+        elif video_analysis.get("audio_success"):
+            job["current_step"] = "Spoken dialogue transcribed via local Whisper..."
+        else:
+            job["current_step"] = "Analyzing context & emotional retention hooks..."
+        await asyncio.sleep(0.4)
         
         if job.get("status") == "CANCELLED":
             return
             
         job["status"] = "GENERATING_METADATA"
         job["progress"] = 75
-        job["current_step"] = "Generating viral titles, descriptions & hashtag bundles..."
+        job["current_step"] = "Writing algorithm-grounded viral title, description & tags..."
         
         # Pre-flight check: is Ollama alive?
         ollama_alive = False
@@ -470,7 +486,10 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
                     "reason": "Standard peak evening engagement slot."
                 },
                 "ai_failed": True,
-                "fallback": True
+                "fallback": True,
+                "source_label": "From caption — video analysis unavailable",
+                "analysis_source": "caption_fallback",
+                "video_analyzed": False
             }
             
             result_payload = {
@@ -482,7 +501,10 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
                 "confidence_notes": "FALLBACK",
                 "scheduled_time": "07:30 PM",
                 "raw_result": raw_result,
-                "ai_failed": True
+                "ai_failed": True,
+                "source_label": "From caption — video analysis unavailable",
+                "analysis_source": "caption_fallback",
+                "video_analyzed": False
             }
             
             job["status"] = "COMPLETED"
@@ -499,7 +521,12 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         initial_state = AgentState({
             "raw_title": title or "",
             "raw_description": description or "",
-            "transcript_text": description or "",
+            "transcript_text": video_analysis.get("audio_transcript") or description or "",
+            "audio_transcript": video_analysis.get("audio_transcript") or "",
+            "visual_description": video_analysis.get("visual_description") or "",
+            "analysis_source": video_analysis.get("analysis_source") or "caption_fallback",
+            "source_label": video_analysis.get("source_label") or "From caption — video analysis unavailable",
+            "video_analyzed": video_analysis.get("video_analyzed", False),
             "url": url or ""
         })
         
@@ -525,7 +552,10 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
                     "description": f"{desc_clean[:180] or 'Watch this trending video!'}\n\nWhat do you think? Let us know below! 👇\n\n👉 Subscribe for daily shorts!\n#Shorts #Viral",
                     "youtube_hashtags": guaranteed_fallback_tags,
                     "instagram_hashtags": guaranteed_fallback_tags,
-                    "ai_failed": True
+                    "ai_failed": True,
+                    "source_label": "From caption — video analysis unavailable",
+                    "analysis_source": "caption_fallback",
+                    "video_analyzed": False
                 },
                 "posting": {"scheduled_time": "19:30", "score": 95, "reason": "Standard peak evening engagement slot."}
             })
@@ -545,6 +575,10 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         instagram_tags = backfill_hashtags(raw_ig, best_title, desc, min_count=7)
         ai_failed = metadata.get("ai_failed", False) or metadata.get("status") == "failed"
         
+        source_label = metadata.get("source_label") or video_analysis.get("source_label") or "From caption — video analysis unavailable"
+        analysis_source = metadata.get("analysis_source") or video_analysis.get("analysis_source") or "caption_fallback"
+        video_analyzed = metadata.get("video_analyzed", False) or video_analysis.get("video_analyzed", False)
+        
         raw_result = {
             "title": best_title,
             "description": desc,
@@ -555,6 +589,12 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
             "title_reason": metadata.get("title_reason", ["High viral hook potential", "Optimized search query"]),
             "posting_recommendation": posting,
             "ai_failed": ai_failed,
+            "source_label": source_label,
+            "analysis_source": analysis_source,
+            "video_analyzed": video_analyzed,
+            "visual_description": video_analysis.get("visual_description", ""),
+            "audio_transcript": video_analysis.get("audio_transcript", ""),
+            "vision_hint": video_analysis.get("vision_hint"),
             "agent_workflow_state": final_state.data if hasattr(final_state, "data") else final_state
         }
         
@@ -567,7 +607,11 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
             "confidence_notes": posting.get("confidence", "HIGH"),
             "scheduled_time": posting.get("human_readable_time", "07:30 PM"),
             "raw_result": raw_result,
-            "ai_failed": ai_failed
+            "ai_failed": ai_failed,
+            "source_label": source_label,
+            "analysis_source": analysis_source,
+            "video_analyzed": video_analyzed,
+            "vision_hint": video_analysis.get("vision_hint")
         }
         
         job["status"] = "COMPLETED"
@@ -662,7 +706,7 @@ async def start_ai_analysis(req: AnalyzeRequest, background_tasks: BackgroundTas
         "error": None
     }
     
-    background_tasks.add_task(execute_ai_analysis_job, job_id, req.title, req.description, req.url)
+    background_tasks.add_task(execute_ai_analysis_job, job_id, req.title, req.description, req.url, req.video_path or "")
     
     return {
         "job_id": job_id,

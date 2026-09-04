@@ -80,13 +80,21 @@ class MasterAgent(BaseAgent):
         is_generic_title = not raw_title or raw_title.lower().startswith("video by") or raw_title.lower().startswith("reel by") or len(raw_title) < 5
         effective_subject = core_quote or cleaned_desc[:250] or (raw_title if not is_generic_title else "Trending Story")
 
+        visual_desc = (state.get("visual_description") or "").strip()
+        audio_transcript = (state.get("audio_transcript") or transcript or "").strip()
+        analysis_source = state.get("analysis_source") or ("video_visual" if visual_desc else ("video_audio" if audio_transcript else "caption_fallback"))
+        source_label = state.get("source_label") or ("Based on video analysis" if (visual_desc or audio_transcript) else "From caption — video analysis unavailable")
+
         system_prompt = (
-            "You are an Elite YouTube Shorts Growth Strategist & Copywriter.\n"
-            "Your metadata must follow YouTube's ranking & CTR principles:\n"
-            "1. TITLE (Single Output): Front-load the hook/keyword in the first 40-50 characters to avoid mobile truncation. Use specific curiosity or emotional relatability (NOT vague hype clickbait). Must be under 60 characters with 1 emoji.\n"
-            "2. DESCRIPTION (Single Output): First 1-2 lines must be a natural-language search-friendly summary (indexed for YouTube search), followed by a viewer question to drive comment velocity (retention signal), and a call-to-subscribe.\n"
-            "3. HASHTAGS: Provide an array of at least 7 relevant, content-grounded hashtags mixing broad (#Shorts, #ShortsFeed, #Viral) and niche topic tags.\n"
-            "4. NEVER invent facts or copy cast credits. Strictly output ONE JSON object with no markdown fences.\n\n"
+            "You are an Elite YouTube Shorts Growth Strategist & Content Creator.\n"
+            "Your job is to generate original, high-CTR metadata reflecting what is ACTUALLY HAPPENING in the video footage.\n\n"
+            "STRICT RULES:\n"
+            "1. PRIMARY SOURCE: Focus on the visual scene description and spoken dialogue. What are the people doing, feeling, saying, or experiencing?\n"
+            "2. ANTI-COPY-PASTE: Do NOT copy, reword, or parrot the raw caption or credits text. Create 100% original copywriting.\n"
+            "3. TITLE: Front-load the hook/keyword in the first 40-50 characters to avoid mobile truncation. Use specific curiosity or emotional relatability (NOT vague hype clickbait). Under 60 characters with 1 emoji.\n"
+            "4. DESCRIPTION: First 1-2 lines must be a natural-language search-friendly summary (indexed for YouTube search), followed by a viewer question to drive comment velocity (retention signal), and a call-to-subscribe.\n"
+            "5. HASHTAGS: Provide an array of at least 7 relevant, content-grounded hashtags mixing broad (#Shorts, #ShortsFeed, #Viral) and niche topic tags.\n"
+            "6. Strictly output ONE JSON object with no markdown fences.\n\n"
             "JSON SCHEMA:\n"
             "{\n"
             '  "title": "Front-loaded hook under 60 chars with emoji",\n'
@@ -98,20 +106,20 @@ class MasterAgent(BaseAgent):
             "}"
         )
         
-        context_parts = [
-            f"SUBJECT & CONTEXT: {effective_subject}",
-            f"RAW CAPTION: {cleaned_desc[:400]}"
-        ]
+        context_parts = []
+        if visual_desc:
+            context_parts.append(f"VISUAL FOOTAGE & SCENE SUMMARY (PRIMARY SOURCE):\n{visual_desc}")
+        if audio_transcript:
+            context_parts.append(f"SPOKEN DIALOGUE & AUDIO (PRIMARY SOURCE):\n{audio_transcript}")
         if core_quote:
-            context_parts.append(f"CORE DIALOGUE / QUOTE: \"{core_quote}\"")
-        if transcript:
-            context_parts.append(f"TRANSCRIPT / SPOKEN AUDIO: {transcript[:250]}")
+            context_parts.append(f"ON-SCREEN TEXT / QUOTE: \"{core_quote}\"")
+        context_parts.append(f"ORIGINAL CAPTION (SECONDARY HINT ONLY - DO NOT COPY):\n{cleaned_desc[:350]}")
         if comments:
-            context_parts.append(f"TOP AUDIENCE COMMENTS: {', '.join(str(c) for c in comments[:3])}")
+            context_parts.append(f"AUDIENCE REACTION: {', '.join(str(c) for c in comments[:2])}")
         if view_count or like_count:
-            context_parts.append(f"METRICS: {view_count} views, {like_count} likes")
+            context_parts.append(f"ENGAGEMENT: {view_count} views, {like_count} likes")
 
-        user_prompt = "Generate YouTube Shorts metadata based on this video content:\n" + "\n".join(context_parts)
+        user_prompt = "Generate original YouTube Shorts metadata based on this video footage:\n" + "\n\n".join(context_parts)
         
         parsed = call_ollama(
             model="qwen2.5:7b",
@@ -120,6 +128,24 @@ class MasterAgent(BaseAgent):
             temperature=0.7,
             max_retries=2
         )
+        
+        # Anti-copy-paste safeguard: check if output is near-identical to raw caption
+        from backend.video_analyzer import check_anti_copy_paste
+        if parsed and (parsed.get("title") or parsed.get("best_title")):
+            cand_title = parsed.get("title") or parsed.get("best_title") or ""
+            cand_desc = parsed.get("description") or parsed.get("optimized_description") or ""
+            if check_anti_copy_paste(cand_title, raw_description) or check_anti_copy_paste(cand_desc, raw_description, threshold=0.75):
+                logger.warning("Anti-copy-paste safeguard triggered. Retrying with strict anti-copy prompt...")
+                retry_prompt = user_prompt + "\n\nCRITICAL REJECTION: Your previous response copied the raw caption text! You must write strictly about what is visually happening in the video footage and dialogue."
+                retry_parsed = call_ollama(
+                    model="qwen2.5:7b",
+                    system_prompt=system_prompt,
+                    user_prompt=retry_prompt,
+                    temperature=0.7,
+                    max_retries=1
+                )
+                if retry_parsed and (retry_parsed.get("title") or retry_parsed.get("best_title")):
+                    parsed = retry_parsed
         
         ai_failed = False
         if not parsed or (not parsed.get("title") and not parsed.get("best_title")):
@@ -173,7 +199,12 @@ class MasterAgent(BaseAgent):
             "description": final_desc,
             "youtube_hashtags": guaranteed_hashtags,
             "instagram_hashtags": guaranteed_hashtags,
-            "ai_failed": ai_failed
+            "ai_failed": ai_failed,
+            "analysis_source": analysis_source,
+            "source_label": source_label,
+            "video_analyzed": state.get("video_analyzed", False) or bool(visual_desc or audio_transcript),
+            "visual_description": visual_desc,
+            "audio_transcript": audio_transcript
         })
         
         state.update("posting", posting_data)

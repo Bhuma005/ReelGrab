@@ -359,8 +359,22 @@ export default function CreateReelPage() {
                         <div className="flex justify-between items-center pb-1">
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] uppercase text-text-muted font-bold tracking-wider">VIRAL TITLE</span>
-                            {store.aiAnalysisResult.ai_failed && (
-                              <span className="text-[9px] bg-warning/20 text-warning px-1.5 py-0.5 rounded border border-warning/30 font-medium">From video caption</span>
+                            {store.aiAnalysisResult.source_label ? (
+                              <span className={`text-[9px] px-2 py-0.5 rounded border font-medium ${
+                                store.aiAnalysisResult.video_analyzed || store.aiAnalysisResult.analysis_source === 'video_visual' || store.aiAnalysisResult.analysis_source === 'video_audio'
+                                  ? 'bg-success/20 text-success border-success/30'
+                                  : 'bg-warning/20 text-warning border-warning/30'
+                              }`}>
+                                {store.aiAnalysisResult.source_label}
+                              </span>
+                            ) : store.aiAnalysisResult.ai_failed ? (
+                              <span className="text-[9px] bg-warning/20 text-warning px-2 py-0.5 rounded border border-warning/30 font-medium">
+                                From caption — video analysis unavailable
+                              </span>
+                            ) : (
+                              <span className="text-[9px] bg-success/20 text-success px-2 py-0.5 rounded border border-success/30 font-medium">
+                                Based on video analysis
+                              </span>
                             )}
                           </div>
                           {store.aiAnalysisResult.raw_result?.viewer_appeal_score && (
@@ -536,7 +550,7 @@ export default function CreateReelPage() {
                             <RefreshCw className="w-3.5 h-3.5 text-accent animate-spin flex-shrink-0" />
                           )}
                           <span className={store.aiProgress >= 20 ? "text-foreground font-medium" : "text-text-muted"}>
-                            Video received & stream verified
+                            Inspecting video footage & key frames
                           </span>
                         </div>
 
@@ -549,7 +563,7 @@ export default function CreateReelPage() {
                             <div className="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">○</div>
                           )}
                           <span className={store.aiProgress >= 40 ? "text-foreground font-medium" : "text-text-muted"}>
-                            Transcript extracted & audio analyzed
+                            Extracting visual frames & spoken dialogue
                           </span>
                         </div>
 
@@ -562,7 +576,7 @@ export default function CreateReelPage() {
                             <div className="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">○</div>
                           )}
                           <span className={store.aiProgress >= 60 ? "text-foreground font-medium" : "text-text-muted"}>
-                            Finding strongest viral hooks & emotional retention
+                            Analyzing visual scene & emotional retention hooks
                           </span>
                         </div>
 
@@ -575,7 +589,7 @@ export default function CreateReelPage() {
                             <div className="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">○</div>
                           )}
                           <span className={store.aiProgress >= 80 ? "text-foreground font-medium" : "text-text-muted"}>
-                            Generating high-CTR titles & viral descriptions
+                            Writing algorithm-grounded viral title & description
                           </span>
                         </div>
 
@@ -588,7 +602,7 @@ export default function CreateReelPage() {
                             <div className="w-3.5 h-3.5 rounded-full border border-border flex items-center justify-center text-[9px] text-text-muted">○</div>
                           )}
                           <span className={store.aiProgress >= 100 ? "text-foreground font-medium" : "text-text-muted"}>
-                            Optimizing hashtag bundles & schedule window
+                            Optimizing guaranteed hashtag bundle (≥7 tags)
                           </span>
                         </div>
                       </div>
