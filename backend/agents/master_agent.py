@@ -22,15 +22,14 @@ def backfill_hashtags(existing_tags: list, title: str, description: str, min_cou
             seen.add(norm)
             normalized.append(cleaned)
 
-    # 2. Extract potential keywords from title & description if needed
-    if len(normalized) < min_count:
-        combined_text = f"{title} {description}"
-        # Extract meaningful alphanumeric words >= 4 chars
-        words = re.findall(r'\b[A-Za-z]{4,15}\b', combined_text)
-        skip_words = {"this", "that", "with", "from", "video", "about", "watch", "more", "their", "only", "ones", "reel", "post"}
-        for word in words:
-            if word.lower() not in skip_words:
-                tag = f"#{word.capitalize()}"
+    # 2. Extract genuine proper nouns or explicit tags from title if needed
+    if len(normalized) < min_count and title:
+        # Only take words from title that look like genuine entities/titles (capitalized, >= 3 chars)
+        title_words = re.findall(r'\b[A-Z][a-zA-Z0-9]{2,14}\b', title)
+        skip_title = {"video", "reel", "post", "watch", "with", "this", "that", "from", "your", "they"}
+        for word in title_words:
+            if word.lower() not in skip_title:
+                tag = f"#{word}"
                 norm = tag.lower()
                 if norm not in seen:
                     seen.add(norm)
@@ -38,9 +37,14 @@ def backfill_hashtags(existing_tags: list, title: str, description: str, min_cou
                 if len(normalized) >= min_count:
                     break
 
-    # 3. High-intent Shorts discovery tags fallback if still under min_count
-    default_discovery_tags = ["#Shorts", "#ShortsFeed", "#Viral", "#Trending", "#ForYou", "#Story", "#Explore", "#MustWatch"]
-    for tag in default_discovery_tags:
+    # 3. Curated high-CTR YouTube Shorts categorization & discovery tags
+    curated_discovery_tags = [
+        "#Shorts", "#ShortsFeed", "#Viral", "#Trending", 
+        "#MovieClips", "#Cinema", "#LoveStory", "#Heartbreak", 
+        "#EmotionalScene", "#MovieRecommendation", "#IndianCinema", 
+        "#MustWatch", "#Relatable", "#ForYou"
+    ]
+    for tag in curated_discovery_tags:
         norm = tag.lower()
         if norm not in seen:
             seen.add(norm)
@@ -48,7 +52,7 @@ def backfill_hashtags(existing_tags: list, title: str, description: str, min_cou
         if len(normalized) >= min_count:
             break
 
-    return normalized
+    return normalized[:max(min_count, len(normalized))]
 
 class MasterAgent(BaseAgent):
     """

@@ -533,23 +533,25 @@ async def execute_ai_analysis_job(job_id: str, title: str, description: str, url
         try:
             final_state = await asyncio.wait_for(
                 asyncio.to_thread(agent.run, initial_state),
-                timeout=75.0
+                timeout=120.0
             )
         except Exception as e:
             logger.warning(f"AI job {job_id} fallback due to: {e}")
             desc_clean = re.sub(r'#\w+', '', description or '').strip()
-            first_line = desc_clean.split('\n')[0].strip() if desc_clean else ''
-            topic = first_line[:55] if (not title or title.lower().startswith('video by') or title.lower().startswith('reel by')) else title
-            fallback_title = f"{topic} 🔥" if topic else "Trending Viral Short"
+            desc_clean = re.split(r'Film Details:|Cast:|Director:|Release Year:|Copyright', desc_clean, flags=re.IGNORECASE)[0].strip()
+            lines = [l.strip() for l in desc_clean.split('\n') if l.strip()]
+            hook_text = lines[1] if len(lines) > 1 and len(lines[0]) < 12 else (lines[0] if lines else '')
+            clean_subject = re.sub(r'[^\w\s]', '', hook_text)[:40].strip()
+            fallback_title = f"Why {clean_subject}... 💔" if clean_subject else "A Moment You Will Never Forget 🥺"
             guaranteed_fallback_tags = backfill_hashtags([], fallback_title, desc_clean, min_count=7)
             final_state = AgentState({
                 "metadata": {
                     "status": "success",
                     "best_title": fallback_title,
-                    "title_candidates": [{"title": fallback_title, "strategy": "Curiosity", "score": 92}],
+                    "title_candidates": [{"title": fallback_title, "strategy": "Emotional Retention", "score": 92}],
                     "viewer_appeal_score": 90,
-                    "title_reason": ["Extracted from caption context"],
-                    "description": f"{desc_clean[:180] or 'Watch this trending video!'}\n\nWhat do you think? Let us know below! 👇\n\n👉 Subscribe for daily shorts!\n#Shorts #Viral",
+                    "title_reason": ["High emotional curiosity hook", "Strong mobile viewer retention"],
+                    "description": f"{hook_text or 'Watch this powerful scene!'}\n\nWhat do you think? Let us know below! 👇\n\n👉 Subscribe for daily shorts!\n#Shorts #Viral",
                     "youtube_hashtags": guaranteed_fallback_tags,
                     "instagram_hashtags": guaranteed_fallback_tags,
                     "ai_failed": True,

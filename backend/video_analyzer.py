@@ -41,34 +41,47 @@ def get_installed_vision_model() -> Optional[str]:
     return None
 
 def find_video_file_for_request(url: str = '', raw_title: str = '', video_path: str = '') -> Optional[str]:
-    if video_path and os.path.exists(video_path) and video_path.lower().endswith(('.mp4', '.mov', '.mkv', '.webm')):
+    if video_path and os.path.exists(video_path) and video_path.lower().endswith(('.mp4', '.mov', '.mkv', '.webm')) and os.path.getsize(video_path) > 1000:
         return video_path
 
     downloads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'downloads')
-    if not os.path.exists(downloads_dir):
-        return None
+    os.makedirs(downloads_dir, exist_ok=True)
 
     if url:
         shortcode_match = re.search(r'/(?:reel|p|shorts)/([A-Za-z0-9_-]+)', url)
         if shortcode_match:
             code = shortcode_match.group(1)
             candidate = os.path.join(downloads_dir, f'{code}.mp4')
-            if os.path.exists(candidate):
+            if os.path.exists(candidate) and os.path.getsize(candidate) > 1000:
                 return candidate
             for f in os.listdir(downloads_dir):
-                if f.startswith(code) and f.endswith('.mp4'):
+                if f.startswith(code) and f.endswith('.mp4') and os.path.getsize(os.path.join(downloads_dir, f)) > 1000:
                     return os.path.join(downloads_dir, f)
 
-    try:
-        files = [
-            os.path.join(downloads_dir, f) for f in os.listdir(downloads_dir)
-            if f.lower().endswith('.mp4') and os.path.isfile(os.path.join(downloads_dir, f))
-        ]
-        if files:
-            files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-            return files[0]
-    except Exception as e:
-        logger.debug(f'Downloads folder check: {e}')
+    # If video is not downloaded yet, auto-download it with yt_dlp so vision model has the actual footage!
+    if url and any(domain in url for domain in ['instagram.com', 'youtube.com', 'youtu.be', 'tiktok.com']):
+        try:
+            logger.info(f"Auto-downloading video for vision frame analysis: {url}")
+            import yt_dlp
+            ydl_opts = {
+                'outtmpl': os.path.join(downloads_dir, '%(id)s.%(ext)s'),
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                'quiet': True,
+                'no_warnings': True,
+                'noplaylist': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if info:
+                    vid_id = info.get('id')
+                    expected = os.path.join(downloads_dir, f"{vid_id}.mp4")
+                    if os.path.exists(expected) and os.path.getsize(expected) > 1000:
+                        return expected
+                    for f in os.listdir(downloads_dir):
+                        if f.startswith(str(vid_id)) and f.endswith('.mp4') and os.path.getsize(os.path.join(downloads_dir, f)) > 1000:
+                            return os.path.join(downloads_dir, f)
+        except Exception as e:
+            logger.warning(f"Could not auto-download video for vision analysis: {e}")
 
     return None
 
